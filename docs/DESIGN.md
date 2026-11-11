@@ -217,12 +217,17 @@ Each entry has: a code, description, how it is generated, and the expected outco
 
 ## 4. Ingestion layer (CDC → current state)
 
-Shared Python module, run before either matching implementation. Output: `current_records.parquet` (one row per live source record) and `rejects.parquet`.
+Shared Python module, run before either matching implementation. For each load it writes to `data/ingested/load_NNNN/`:
+
+- `current_records.parquet`: one row per live source record. Input to matching.
+- `rejects.parquet`: events rejected in this load, with reason code and detail.
+- `state.parquet`: every key ever seen, including tombstones. Input to the next load.
+- `metrics.json`: events read, rejected (per reason), duplicates dropped, stale events ignored, events applied, live records and tombstones.
 
 1. **Validate** each event against the schema contract. Reject with a reason code (`REJECT_MISSING_KEY`, `REJECT_COLUMN_SHIFT`, `REJECT_ENCODING`, `REJECT_BAD_OP`). Rejections are logged, not queued for review.
 2. **Deduplicate** by `event_id`.
 3. **Order** by `sequence_no` per `(source_system, source_record_id)`. `event_ts` is informational only.
-4. **Apply** events to the prior current state. The highest sequence_no wins. A delete creates a tombstone; any event with a lower sequence_no than the tombstone is ignored. An insert with a higher sequence_no after a delete starts a new record life.
+4. **Apply** events to the prior current state. The highest sequence_no wins. A delete creates a tombstone; any event with a lower sequence_no than the tombstone is ignored. An insert with a higher sequence_no after a delete starts a new record life. An update for an unknown or deleted key is applied as an upsert (D-027).
 5. **Idempotency:** reprocessing any load, or replaying old loads, must produce the same current state.
 
 ## 5. Standardization
@@ -517,6 +522,16 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Decision:* Each load directory has a `manifest.json` with its load date (load 0 = `simulation_start`, then monthly). The pipeline may read it.
 - *Alternatives:* Use the wall-clock date; infer the date from `event_ts`.
 - *Reason:* Standardization needs "today" to null out future DOBs and to detect newborns. The wall clock would make results depend on when they are run, and `event_ts` is informational only (section 4).
+
+**D-027 · 2026-11-11 · Record lives, upserts and persisted tombstones**
+- *Decision:* Ingestion keeps one state row per key ever seen, tombstones included, in `state.parquet` between loads. Any I or U for a new or deleted key starts a new record life (`record_life` counts them); a U for an unknown key is applied as an upsert because it carries the full row. A D for an unknown key leaves a tombstone. Equal sequence numbers are ordered by `event_id`.
+- *Alternatives:* Drop updates for unknown keys; forget tombstones after the load that created them.
+- *Reason:* Section 3.2 guarantees full row images, so an upsert loses nothing, and it recovers records whose insert was rejected. Persisted tombstones are what make a late update after a delete (LATE_AFTER_DELETE) and replays of old loads no-ops.
+
+**D-028 · 2026-11-11 · Structural validation only; mojibake is rejected**
+- *Decision:* Validation rejects broken *structure*, never bad *values*: placeholder SSNs, impossible DOBs and odd formats pass to standardization. Column shift needs a DOB containing letters plus a corroborating sign (empty first name, date-like SSN, or identifier-like gender). Mojibake (a UTF-8 lead byte followed by a continuation byte, decoded as Latin-1) and control or replacement characters are rejected as `REJECT_ENCODING`, resolving "rejected or flagged" in section 3.7 to rejected.
+- *Alternatives:* Reject any unparseable DOB as corruption; repair mojibake by re-decoding.
+- *Reason:* A single bad DOB is a data quality case the catalog expects matching to handle (DOB_PLACEHOLDER, DOB_YEAR_ONLY), so it must not be confused with a shift. Repairing mojibake is guesswork and would hide the case; the next clean update for the key is accepted (D-027). A test checks rejects against ground truth in both directions: nothing clean is rejected and no corrupted record is missed.
 
 ## 19. Publishing on GitHub
 

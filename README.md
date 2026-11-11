@@ -2,8 +2,8 @@
 
 <!-- CI badge goes here once the GitHub repository exists. -->
 
-> **Status: under construction.** Build phases 1–2 of 8 are complete: repository skeleton,
-> configuration, reference data, and the synthetic data generator. Results and the full quickstart arrive in later phases;
+> **Status: under construction.** Build phases 1–3 of 8 are complete: repository skeleton,
+> configuration, reference data, the synthetic data generator, and CDC ingestion. Results and the full quickstart arrive in later phases;
 > see [build phases](docs/DESIGN.md#17-build-phases).
 
 **The problem.** The same person shows up in many source systems under slightly
@@ -54,6 +54,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 make install                       # Windows without make: see below
 make check-config
 make generate                      # small preset: 13 monthly loads in a few seconds
+make ingest                        # apply the CDC events to a current-state table
 make test
 ```
 
@@ -64,6 +65,7 @@ python -m pip install -r requirements-lock.txt
 python -m pip install --no-deps -e .
 python -m pipeline check-config
 python -m pipeline generate --preset small
+python -m pipeline ingest
 python -m pytest
 ```
 
