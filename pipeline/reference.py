@@ -26,6 +26,7 @@ from pipeline import paths
 NICKNAME_RELATIONS: frozenset[str] = frozenset({"nickname", "transliteration", "spelling"})
 GENDERS: frozenset[str] = frozenset({"M", "F", "U"})
 PLACEHOLDER_FIELDS: frozenset[str] = frozenset({"name", "ssn", "dob"})
+STANDARD_GENDERS: frozenset[str] = frozenset({"M", "F", "X"})
 
 
 class ReferenceDataError(ValueError):
@@ -64,6 +65,8 @@ class ReferenceData:
     placeholders: tuple[Placeholder, ...]
     particles: tuple[str, ...]
     suffixes: dict[str, str]
+    letters: dict[str, str]
+    genders: dict[str, str]
 
     def placeholder_values(self, field: str) -> frozenset[str]:
         """All placeholder values for ``name``, ``ssn`` or ``dob``."""
@@ -166,6 +169,36 @@ def load_suffixes(path: Path | None = None) -> dict[str, str]:
     return {row["form"]: row["canonical"] for row in rows}
 
 
+def load_letters(path: Path | None = None) -> dict[str, str]:
+    """Load ``letters.csv``: accented or special Latin letters mapped to ASCII.
+
+    Accent stripping is table-driven so that DuckDB and Spark, which have no
+    common accent-stripping function, can reproduce it exactly (D-029).
+    """
+    path = path or paths.REFERENCE_DIR / "letters.csv"
+    rows = _read_csv(path, ["character", "replacement"])
+    for row in rows:
+        if len(row["character"]) != 1 or row["character"].isascii():
+            raise ReferenceDataError(f"letters.csv: {row['character']!r} is not one non-ASCII char")
+        if not (row["replacement"].isascii() and row["replacement"].isupper()):
+            raise ReferenceDataError(f"letters.csv: bad replacement {row['replacement']!r}")
+    _check_unique([(row["character"],) for row in rows], "letters.csv")
+    return {row["character"]: row["replacement"] for row in rows}
+
+
+def load_genders(path: Path | None = None) -> dict[str, str]:
+    """Load ``genders.csv``: raw gender values mapped to M, F or X. Others become null."""
+    path = path or paths.REFERENCE_DIR / "genders.csv"
+    rows = _read_csv(path, ["value", "gender"])
+    for row in rows:
+        if row["gender"] not in STANDARD_GENDERS:
+            raise ReferenceDataError(f"genders.csv: bad gender {row['gender']!r}")
+        if row["value"] != row["value"].upper():
+            raise ReferenceDataError(f"genders.csv: value {row['value']!r} must be uppercase")
+    _check_unique([(row["value"],) for row in rows], "genders.csv")
+    return {row["value"]: row["gender"] for row in rows}
+
+
 def load_reference_data(reference_dir: Path = paths.REFERENCE_DIR) -> ReferenceData:
     """Load every reference table from ``reference_dir``."""
     return ReferenceData(
@@ -173,4 +206,6 @@ def load_reference_data(reference_dir: Path = paths.REFERENCE_DIR) -> ReferenceD
         placeholders=load_placeholders(reference_dir / "placeholders.csv"),
         particles=load_particles(reference_dir / "particles.csv"),
         suffixes=load_suffixes(reference_dir / "suffixes.csv"),
+        letters=load_letters(reference_dir / "letters.csv"),
+        genders=load_genders(reference_dir / "genders.csv"),
     )

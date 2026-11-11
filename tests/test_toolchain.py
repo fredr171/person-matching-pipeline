@@ -62,6 +62,12 @@ def test_dbt_reads_reference_data_identically(dbt_env, reference_data):
         assert rows("select form, canonical from stg_ref_suffixes") == set(
             reference_data.suffixes.items()
         )
+        assert rows('select "character", replacement from stg_ref_letters') == set(
+            reference_data.letters.items()
+        )
+        assert rows("select value, gender from stg_ref_genders") == set(
+            reference_data.genders.items()
+        )
 
 
 def test_spark_local_session_runs_apply_in_pandas(monkeypatch):

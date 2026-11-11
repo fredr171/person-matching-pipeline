@@ -35,6 +35,25 @@ models:
       - name: particle
         data_tests: [not_null, unique]
 
+  - name: stg_ref_letters
+    description: Accented and special letters mapped to ASCII (accent stripping, D-029).
+    columns:
+      - name: character
+        data_tests: [not_null, unique]
+      - name: replacement
+        data_tests: [not_null]
+
+  - name: stg_ref_genders
+    description: Raw gender values mapped to M, F or X; unlisted values become null.
+    columns:
+      - name: value
+        data_tests: [not_null, unique]
+      - name: gender
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["M", "F", "X"]
+
   - name: stg_ref_suffixes
     columns:
       - name: form

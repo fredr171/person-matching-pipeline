@@ -7,7 +7,7 @@ from datetime import date
 
 import pytest
 
-from pipeline import reference
+from pipeline import paths, reference
 
 # Standardized form (DESIGN.md section 5): uppercase ASCII, digits, single spaces,
 # hyphens and apostrophes. Reference values must already be in this form.
@@ -127,3 +127,28 @@ def test_self_mapping_variant_is_rejected(tmp_path):
     )
     with pytest.raises(reference.ReferenceDataError, match="maps to itself"):
         reference.load_name_variants(bad)
+
+
+def test_letters_cover_every_non_ascii_letter_in_the_name_data(reference_data):
+    used = set()
+    for name in ("first_names.csv", "last_names.csv"):
+        text = (paths.REPO_ROOT / "generator" / "data" / name).read_text(encoding="utf-8")
+        used |= {c for c in text if not c.isascii()}
+    assert used <= reference_data.letters.keys()
+
+
+def test_letters_agree_with_unicode_decomposition(reference_data):
+    """Where Unicode decomposes a letter, the table must give the same base letter."""
+    import unicodedata
+
+    for char, replacement in reference_data.letters.items():
+        base = "".join(
+            c for c in unicodedata.normalize("NFKD", char) if unicodedata.category(c) != "Mn"
+        )
+        if base.isascii() and base.isalpha():
+            assert replacement == base.upper(), char
+
+
+def test_genders_map_only_to_standard_values(reference_data):
+    assert set(reference_data.genders.values()) == {"M", "F", "X"}
+    assert reference_data.genders["F"] == "F" and "U" not in reference_data.genders

@@ -83,7 +83,8 @@ def _check_config() -> int:
     print(
         f"reference/      OK  {len(ref.name_variants)} name variants, "
         f"{len(ref.placeholders)} placeholders, {len(ref.particles)} particles, "
-        f"{len(ref.suffixes)} suffix forms"
+        f"{len(ref.suffixes)} suffix forms, {len(ref.letters)} letters, "
+        f"{len(ref.genders)} gender values"
     )
     return EXIT_OK
 
