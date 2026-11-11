@@ -1,0 +1,35 @@
+# Generated data is never committed; regenerate with `make generate`.
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# dbt
+matching_dbt/target/
+matching_dbt/logs/
+matching_dbt/dbt_packages/
+matching_dbt/.user.yml
+logs/
+
+# Spark
+spark-warehouse/
+metastore_db/
+derby.log
+
+# DuckDB
+*.duckdb
+*.duckdb.wal
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

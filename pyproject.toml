@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools==84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "person-matching-pipeline"
+version = "0.1.0"
+description = "Rule-based person matching (entity resolution) on synthetic CDC data, implemented in dbt-duckdb and PySpark with identical results."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+# Direct dependencies are pinned exactly (D-012). The full transitive set is
+# frozen in requirements-lock.txt, which is what CI installs.
+dependencies = [
+    "dbt-core==1.12.6",
+    "dbt-duckdb==1.11.1",
+    "duckdb==2.0.0",
+    "matplotlib==3.11.2",
+    "metaphone==0.6",
+    "numpy==2.5.4",
+    "pandas==2.3.3",
+    "pyarrow==26.0.1",
+    "pyspark==4.3.0",
+    "pyyaml==6.0.3",
+    "rapidfuzz==3.14.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.2.0",
+    "ruff==0.17.4",
+]
+
+[tool.setuptools]
+packages = [
+    "pipeline",
+    "generator",
+    "ingestion",
+    "standardization",
+    "matching_spark",
+    "clustering",
+    "evaluation",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+# PySpark warns when pandas is too new for it; treat that as a failure (D-019).
+filterwarnings = ["error:PySpark does not yet fully support pandas:FutureWarning"]
+markers = [
+    "toolchain: smoke tests that start dbt or Spark (slower)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
