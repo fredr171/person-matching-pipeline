@@ -1,0 +1,119 @@
+name,culture,weight
+Smith,anglo,2.4
+Johnson,anglo,1.9
+Williams,anglo,1.6
+Brown,anglo,1.4
+Jones,anglo,1.4
+Miller,anglo,1.1
+Davis,anglo,1.1
+Wilson,anglo,0.8
+Anderson,anglo,0.8
+Taylor,anglo,0.8
+Thomas,anglo,0.7
+Moore,anglo,0.7
+Jackson,anglo,0.7
+Martin,anglo,0.7
+Lee,anglo,0.7
+Thompson,anglo,0.6
+White,anglo,0.6
+Harris,anglo,0.6
+Clark,anglo,0.5
+Lewis,anglo,0.5
+Robinson,anglo,0.5
+Walker,anglo,0.5
+Young,anglo,0.5
+Allen,anglo,0.5
+King,anglo,0.5
+Wright,anglo,0.5
+Scott,anglo,0.4
+Hill,anglo,0.4
+Green,anglo,0.4
+Adams,anglo,0.4
+Baker,anglo,0.4
+Nelson,anglo,0.4
+Carter,anglo,0.4
+Mitchell,anglo,0.4
+Phillips,anglo,0.3
+O'Brien,anglo,0.2
+O'Connor,anglo,0.2
+McDonald,anglo,0.2
+Fitzgerald,anglo,0.1
+García,hispanic,1.1
+Rodríguez,hispanic,0.9
+Martínez,hispanic,0.9
+Hernández,hispanic,0.9
+López,hispanic,0.9
+González,hispanic,0.8
+Pérez,hispanic,0.6
+Sánchez,hispanic,0.6
+Ramírez,hispanic,0.5
+Torres,hispanic,0.4
+Flores,hispanic,0.4
+Rivera,hispanic,0.4
+Gómez,hispanic,0.3
+Díaz,hispanic,0.3
+Cruz,hispanic,0.3
+Morales,hispanic,0.3
+Reyes,hispanic,0.3
+Jiménez,hispanic,0.2
+Muñoz,hispanic,0.2
+Castillo,hispanic,0.2
+De la Cruz,hispanic,0.15
+Del Rosario,hispanic,0.1
+De León,hispanic,0.1
+Peña,hispanic,0.1
+Nguyen,east_asian,0.6
+Wang,east_asian,0.5
+Li,east_asian,0.5
+Kim,east_asian,0.5
+Zhang,east_asian,0.4
+Chen,east_asian,0.4
+Liu,east_asian,0.3
+Park,east_asian,0.3
+Tran,east_asian,0.3
+Huang,east_asian,0.2
+Wu,east_asian,0.2
+Tanaka,east_asian,0.2
+Sato,east_asian,0.2
+Suzuki,east_asian,0.2
+Patel,south_asian,0.6
+Singh,south_asian,0.5
+Kumar,south_asian,0.4
+Shah,south_asian,0.3
+Sharma,south_asian,0.3
+Gupta,south_asian,0.2
+Reddy,south_asian,0.2
+Iyer,south_asian,0.1
+Krishnan,south_asian,0.1
+Chatterjee,south_asian,0.1
+Venkataraman,south_asian,0.1
+Khan,arabic,0.4
+Hassan,arabic,0.3
+Ali,arabic,0.3
+Ahmed,arabic,0.3
+Ibrahim,arabic,0.2
+Mahmoud,arabic,0.2
+Haddad,arabic,0.2
+Khoury,arabic,0.2
+Al-Rashid,arabic,0.1
+Al Masri,arabic,0.1
+El-Amin,arabic,0.1
+Abdel-Rahman,arabic,0.1
+Müller,european,0.2
+Schmidt,european,0.2
+Rossi,european,0.2
+Da Silva,european,0.2
+Van der Berg,european,0.1
+Van den Bosch,european,0.1
+De Vries,european,0.1
+Di Stefano,european,0.1
+Dos Santos,european,0.1
+Le Blanc,european,0.1
+Dubois,european,0.1
+Lefèvre,european,0.1
+Bianchi,european,0.1
+Jansen,european,0.1
+Schröder,european,0.1
+Novak,european,0.1
+Von Bergen,european,0.05
+Østergaard,european,0.05

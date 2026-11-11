@@ -8,11 +8,12 @@ SEED ?=
 
 SEED_ARG := $(if $(SEED),--seed $(SEED),)
 
-.PHONY: help install check-config generate ingest match-dbt match-spark evaluate test lint format
+.PHONY: help install check-config docs generate ingest match-dbt match-spark evaluate test lint format
 
 help:
 	@echo "make install      Install pinned dependencies and the project (editable)"
 	@echo "make check-config Validate config and reference data"
+	@echo "make docs         Regenerate docs/DATA_GENERATION.md from config"
 	@echo "make generate     Generate synthetic CDC loads    (PRESET=$(PRESET) SEED=...)"
 	@echo "make ingest       Apply CDC events to current state"
 	@echo "make match-dbt    Run matching with dbt on DuckDB (PROFILE=$(PROFILE))"
@@ -53,3 +54,6 @@ format:
 
 check-config:
 	$(PYTHON) -m pipeline check-config
+
+docs:
+	$(PYTHON) -m pipeline docs

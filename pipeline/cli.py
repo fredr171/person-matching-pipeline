@@ -12,16 +12,17 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from collections.abc import Sequence
+from pathlib import Path
 
-from pipeline import config, reference
+from pipeline import config, paths, reference
 
 EXIT_OK = 0
 EXIT_NOT_IMPLEMENTED = 2
 
 # Command -> build phase that implements it.
 _PLANNED_COMMANDS: dict[str, tuple[int, str]] = {
-    "generate": (2, "Generate synthetic CDC loads with ground truth"),
     "ingest": (3, "Apply CDC events to the current-state table"),
     "match-dbt": (5, "Run matching with dbt on DuckDB"),
     "evaluate": (6, "Score results against ground truth"),
@@ -38,11 +39,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("check-config", help="Load and validate all configuration and reference data")
 
+    generate = sub.add_parser("generate", help="Generate synthetic CDC loads with ground truth")
+    generate.add_argument("--preset", default=None, help="small | medium | large")
+    generate.add_argument("--seed", type=int, default=None, help="Override the config seed")
+    generate.add_argument(
+        "--data-dir", type=Path, default=paths.DEFAULT_DATA_DIR, help="Output directory"
+    )
+
+    sub.add_parser("docs", help="Regenerate docs/DATA_GENERATION.md from the config")
+
     for name, (phase, help_text) in _PLANNED_COMMANDS.items():
         command = sub.add_parser(name, help=f"{help_text} (phase {phase})")
-        if name == "generate":
-            command.add_argument("--preset", default=None, help="small | medium | large")
-            command.add_argument("--seed", type=int, default=None, help="Override the config seed")
         if name in {"match-dbt", "match-spark", "evaluate"}:
             command.add_argument(
                 "--profile", default=None, help="conservative | balanced | aggressive"
@@ -74,8 +81,33 @@ def _check_config() -> int:
     return EXIT_OK
 
 
+def _generate(preset: str | None, seed: int | None, data_dir: Path) -> int:
+    from generator.generate import generate
+
+    started = time.perf_counter()
+    summary = generate(preset_name=preset, seed=seed, data_dir=data_dir)
+    print(
+        f"Generated preset={summary.preset} seed={summary.seed}: {summary.loads} loads, "
+        f"{summary.people:,} people, {summary.records:,} records, {summary.events:,} events "
+        f"in {time.perf_counter() - started:.1f}s -> {data_dir}"
+    )
+    return EXIT_OK
+
+
+def _docs() -> int:
+    from generator.docs import write_docs
+
+    print(f"Wrote {write_docs()}")
+    return EXIT_OK
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.command == "generate":
+        return _generate(args.preset, args.seed, args.data_dir)
+    if args.command == "docs":
+        return _docs()
 
     if args.command == "check-config":
         try:
