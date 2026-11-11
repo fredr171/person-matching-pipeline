@@ -1,0 +1,50 @@
+# Matching configuration (DESIGN.md sections 6, 7, 9, 11 and 12).
+# Read identically by the dbt and PySpark implementations.
+
+default_profile: conservative
+
+# Name similarity thresholds are Jaro-Winkler scores in [0, 1].
+#   STRONG: score >= strong_name_threshold
+#   WEAK:   weak_name_threshold <= score < strong_name_threshold
+profiles:
+  conservative:
+    strong_name_threshold: 0.95
+    weak_name_threshold: 0.88
+    tier_4_matches: false
+    use_case: "Healthcare: a false merge can put the wrong allergies or medications on a chart"
+  balanced:
+    strong_name_threshold: 0.92
+    weak_name_threshold: 0.85
+    tier_4_matches: false
+    use_case: General purpose
+  aggressive:
+    strong_name_threshold: 0.88
+    weak_name_threshold: 0.82
+    tier_4_matches: true
+    use_case: "Marketing: duplicates are cheap"
+
+names:
+  # Prefix rule: a name that is a prefix of the other counts as STRONG when the
+  # shorter name has at least this many characters (NAME_TRUNCATED).
+  prefix_min_length: 6
+
+blockers:
+  # SSN EXACT/NEAR with a DOB gap of at least this many years is generational.
+  generational_gap_years: 12
+  # "Newborn on SSN": the placeholder-named record's DOB is within this window
+  # of the load date.
+  newborn_max_age_years: 1
+
+blocking:
+  # Blocks with more records than this are skipped and reported (section 6).
+  max_block_size: 1000
+  keys:
+    - ssn
+    - dob
+    - ssn_sorted_digits_birth_year
+    - ssn_first5_birth_year
+    - last_phonetic_first_initial_birth_year
+
+person_id:
+  prefix: P
+  digits: 9

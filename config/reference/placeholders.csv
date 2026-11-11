@@ -1,0 +1,45 @@
+field,value,reason
+name,BABY,newborn default
+name,BABY BOY,newborn default
+name,BABY GIRL,newborn default
+name,BOY,newborn default
+name,GIRL,newborn default
+name,INFANT,newborn default
+name,NEWBORN,newborn default
+name,UNKNOWN,unknown value
+name,UNK,unknown value
+name,FNU,first name unknown
+name,LNU,last name unknown
+name,NFN,no first name
+name,NLN,no last name
+name,NONE,unknown value
+name,NULL,unknown value
+name,NA,unknown value
+name,TEST,test record
+name,TEST USER,test record
+name,USER,test record
+name,PATIENT,test record
+name,ASDF,keyboard filler
+name,XXX,keyboard filler
+name,QWERTY,keyboard filler
+ssn,000000000,all zeros
+ssn,111111111,repeated digits
+ssn,222222222,repeated digits
+ssn,333333333,repeated digits
+ssn,444444444,repeated digits
+ssn,555555555,repeated digits
+ssn,666666666,repeated digits
+ssn,777777777,repeated digits
+ssn,888888888,repeated digits
+ssn,999999999,repeated digits
+ssn,123456789,sequential digits
+ssn,987654321,sequential digits
+ssn,078051120,published example SSN
+ssn,219099999,published example SSN
+dob,1900-01-01,system default
+dob,1901-01-01,system default
+dob,1899-12-31,system default
+dob,1800-01-01,system default
+dob,1111-11-11,keyboard filler
+dob,0001-01-01,system default
+dob,9999-12-31,system default

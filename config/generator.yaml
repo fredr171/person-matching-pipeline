@@ -1,0 +1,493 @@
+# Synthetic data generator configuration (DESIGN.md section 3).
+#
+# docs/DATA_GENERATION.md is rendered from this file; do not edit the rendered
+# catalog by hand.
+#
+# Edge case rate semantics (D-016): `rate` is the probability that an
+# *eligible* unit receives the edge case. The unit is one of:
+#   person  - a true person (applied once, at a point on their timeline)
+#   record  - a single emitted source record
+#   event   - a single CDC event
+#   load    - a whole refresh load (e.g. "this load contains a migration")
+# Eligibility (e.g. only people born on Feb 29 can get DOB_LEAP_DAY) is stated
+# in `generation`. Rates are deliberately exaggerated (D-008).
+
+seed: 42
+default_preset: medium
+
+presets:
+  small:
+    initial_records: 1000
+    refresh_records: {min: 40, max: 60}
+    refresh_loads: 12
+  medium:
+    initial_records: 100000
+    refresh_records: {min: 2000, max: 5000}
+    refresh_loads: 12
+  large:
+    initial_records: 5000000
+    refresh_records: {min: 90000, max: 110000}
+    refresh_loads: 12
+
+# Share of operations in each refresh load (section 3.4). Must sum to 1.
+refresh_mix:
+  insert: 0.70
+  update: 0.25
+  delete: 0.05
+
+# Records per true person (section 3.5). Keys are record counts; `tail` draws
+# uniformly between tail_min and tail_max. Probabilities must sum to 1.
+# Expected mean = 1.395, matching the ~1.4 target.
+records_per_person:
+  "1": 0.80
+  "2": 0.12
+  "3": 0.04
+  "4": 0.02
+  "5": 0.01
+  tail: 0.01
+  tail_min: 6
+  tail_max: 15
+
+# Ages at the initial load, in years. Newborns (age 0) are generated explicitly.
+population:
+  min_age_years: 0
+  max_age_years: 100
+  newborn_share: 0.02
+
+source_systems:
+  - {name: EHR_A, weight: 0.45}
+  - {name: CLAIMS_B, weight: 0.35, family_name_first: true}
+  - {name: LAB_C, weight: 0.20}
+
+edge_cases:
+  # --- Identifier errors and placeholders ---------------------------------
+  - code: SSN_TYPO_SUB
+    category: identifier
+    description: One SSN digit substituted.
+    generation: Replace one random digit of the true SSN with a different digit.
+    expected_outcome: Tier 2 match
+    unit: record
+    rate: 0.03
+  - code: SSN_TYPO_TRANSPOSE
+    category: identifier
+    description: Two adjacent SSN digits transposed.
+    generation: Swap one pair of adjacent, non-equal digits.
+    expected_outcome: Tier 2 match
+    unit: record
+    rate: 0.02
+  - code: SSN_NUMERIC_CORRUPT
+    category: identifier
+    description: SSN mangled by a numeric type (leading zeros lost, .0 suffix, scientific notation).
+    generation: Render the SSN as an integer, float string, or scientific notation.
+    expected_outcome: Fixed by standardization, then normal tiers
+    unit: record
+    rate: 0.02
+  - code: SSN_PLACEHOLDER
+    category: identifier
+    description: Placeholder SSN such as 000-00-0000, 123-45-6789, 999-99-9999 or repeated digits.
+    generation: Replace the SSN with a value from the SSN placeholders.
+    expected_outcome: Treated as missing
+    unit: record
+    rate: 0.02
+  - code: SSN_TEMP_ITIN
+    category: identifier
+    description: Temporary ID or ITIN in the SSN field (starts with 9).
+    generation: Replace the SSN with a valid-looking 9xx-xx-xxxx number.
+    expected_outcome: Treated as missing
+    unit: record
+    rate: 0.01
+  - code: SSN_DELAYED
+    category: identifier
+    description: Record first arrives with no SSN; a later update adds it.
+    generation: Insert with blank SSN, then an update in a later load sets the true SSN.
+    expected_outcome: Same source record updates; matching uses new SSN
+    unit: record
+    rate: 0.02
+  - code: SSN_CORRECTED
+    category: identifier
+    description: Wrong SSN later corrected by the source.
+    generation: Insert with another person's or a random SSN; a later update restores the true SSN.
+    expected_outcome: Rematch reflects corrected value
+    unit: record
+    rate: 0.01
+  - code: DOB_TYPO_DIGIT
+    category: identifier
+    description: One DOB digit wrong.
+    generation: Change one digit of the date while keeping it a valid date.
+    expected_outcome: Tier 3 match
+    unit: record
+    rate: 0.02
+  - code: DOB_MONTH_DAY_SWAP
+    category: identifier
+    description: Month and day swapped (03/04 vs 04/03).
+    generation: Swap month and day; eligible only when both are 12 or less and differ.
+    expected_outcome: Tier 3 match
+    unit: record
+    rate: 0.02
+  - code: DOB_YEAR_OFF_ONE
+    category: identifier
+    description: Year off by one, same month and day.
+    generation: Add or subtract one year.
+    expected_outcome: Tier 3 match
+    unit: record
+    rate: 0.01
+  - code: DOB_LEAP_DAY
+    category: identifier
+    description: Feb 29 recorded as Feb 28 or Mar 1.
+    generation: Eligible only for people born on Feb 29; shift to an adjacent day.
+    expected_outcome: Tier 3 match
+    unit: record
+    rate: 0.50
+  - code: DOB_PLACEHOLDER
+    category: identifier
+    description: Default DOB such as 1900-01-01.
+    generation: Replace the DOB with a value from the DOB placeholders.
+    expected_outcome: Treated as missing
+    unit: record
+    rate: 0.01
+  - code: DOB_JAN_FIRST
+    category: identifier
+    description: Jan 1 used when only the birth year is known.
+    generation: Keep the true year, set month and day to 01-01.
+    expected_outcome: Kept, flagged weak
+    unit: record
+    rate: 0.01
+  - code: DOB_TWO_DIGIT_YEAR
+    category: identifier
+    description: Two-digit year parsed into the wrong century (85 -> 2085).
+    generation: Write the DOB with a two-digit year that a naive parser reads as a future date.
+    expected_outcome: Future DOB treated as missing
+    unit: record
+    rate: 0.01
+  - code: DOB_YEAR_ONLY
+    category: identifier
+    description: Only a year provided.
+    generation: Write only the four-digit year.
+    expected_outcome: Treated as missing
+    unit: record
+    rate: 0.005
+  - code: DOB_CORRECTED
+    category: identifier
+    description: DOB legally corrected later.
+    generation: Person's records carry a wrong DOB; in a later load all sources update to the corrected DOB.
+    expected_outcome: Rematch reflects corrected value
+    unit: person
+    rate: 0.005
+
+  # --- Name variation ------------------------------------------------------
+  - code: NAME_TYPO
+    category: name
+    description: Misspelling, duplicated or dropped letter.
+    generation: Apply one substitution, duplication or deletion to a first or last name.
+    expected_outcome: Strong name via fuzzy
+    unit: record
+    rate: 0.04
+  - code: NAME_NICKNAME
+    category: name
+    description: Nickname used instead of the formal name (Dave/David, Bob/Robert, Peggy/Margaret).
+    generation: Replace the first name with a variant from nicknames.csv.
+    expected_outcome: Strong name via nickname table
+    unit: record
+    rate: 0.04
+  - code: NAME_PHONETIC
+    category: name
+    description: Phonetically equivalent spelling (Catherine/Katherine, Smith/Smyth).
+    generation: Replace a name with a curated sound-alike spelling.
+    expected_outcome: Strong name via phonetic
+    unit: record
+    rate: 0.02
+  - code: NAME_TRANSLITERATION
+    category: name
+    description: Transliteration variant (Mohammed/Muhammad/Mohamed).
+    generation: Eligible only for names with transliteration variants in nicknames.csv; swap to another variant.
+    expected_outcome: Strong name via variant table
+    unit: record
+    rate: 0.30
+  - code: NAME_SWAPPED
+    category: name
+    description: First and last names reversed on one record.
+    generation: Swap first_name and last_name.
+    expected_outcome: Swapped level; matches per tiers
+    unit: record
+    rate: 0.01
+  - code: NAME_FAMILY_FIRST
+    category: name
+    description: Systematic family-name-first ordering from one source.
+    generation: Eligible only for East Asian names in a source with family_name_first; write family name into first_name.
+    expected_outcome: Swapped level
+    unit: record
+    rate: 0.50
+  - code: NAME_MIDDLE_IN_FIRST
+    category: name
+    description: Middle name included in the first name ("Mary Ann").
+    generation: Append a middle name to first_name.
+    expected_outcome: Token match
+    unit: record
+    rate: 0.02
+  - code: NAME_CONCATENATED
+    category: name
+    description: Two-part name written without a space (MaryAnn vs Mary Ann).
+    generation: Eligible only for multi-token names; remove the space.
+    expected_outcome: Space-removed comparison
+    unit: record
+    rate: 0.30
+  - code: NAME_INITIAL
+    category: name
+    description: Initial only ("D." vs David).
+    generation: Replace the first name with its initial, with or without a period.
+    expected_outcome: Weak name
+    unit: record
+    rate: 0.01
+  - code: NAME_TRUNCATED
+    category: name
+    description: Name truncated by a field length limit (Christopher -> Christoph).
+    generation: Eligible only for names of 8+ characters; cut to between 6 and length-1 characters.
+    expected_outcome: Prefix rule (>= 6 chars)
+    unit: record
+    rate: 0.02
+  - code: NAME_COMPOUND_SURNAME
+    category: name
+    description: Compound surname recorded in full or in part (Garcia Lopez vs Lopez).
+    generation: Eligible only for compound surnames; keep both parts or only one.
+    expected_outcome: Token match
+    unit: record
+    rate: 0.30
+  - code: NAME_PARTICLE
+    category: name
+    description: Surname particle written differently or dropped (De la Cruz / Delacruz / Cruz).
+    generation: Eligible only for surnames with a particle; vary spacing or drop the particle.
+    expected_outcome: Particle-stripped comparison
+    unit: record
+    rate: 0.30
+  - code: NAME_UNICODE
+    category: name
+    description: Accents present or absent, composed or decomposed Unicode (Jose vs José).
+    generation: Eligible only for names containing accents; strip accents or emit NFD form.
+    expected_outcome: NFC normalize, strip accents
+    unit: record
+    rate: 0.30
+  - code: NAME_SUFFIX_IN_LAST
+    category: name
+    description: Generational suffix inside the last name ("Smith Jr." / "Smith, Jr").
+    generation: Eligible only for people with a suffix; append it to last_name in a random format.
+    expected_outcome: Suffix extracted in standardization
+    unit: record
+    rate: 0.50
+  - code: NAME_PLACEHOLDER
+    category: name
+    description: Placeholder name (Baby Boy, Infant, Unknown, FNU, LNU, Test User, Asdf).
+    generation: Replace first and/or last name with a value from the name placeholders.
+    expected_outcome: Treated as missing
+    unit: record
+    rate: 0.01
+  - code: NAME_MONONYM
+    category: name
+    description: Person with a single legal name, repeated in both fields or filled with LNU/FNU.
+    generation: Generate a mononym person; sources write it twice or pad with a placeholder.
+    expected_outcome: Placeholder handling; documented limitation
+    unit: person
+    rate: 0.002
+
+  # --- Life and legal events ----------------------------------------------
+  - code: MARRIAGE
+    category: life_event
+    description: Last name changes on marriage.
+    generation: Eligible only for adults; at a timeline point, new records and updates use a new last name.
+    expected_outcome: Tier 1 (one strong name)
+    unit: person
+    rate: 0.03
+  - code: DIVORCE_RESTORE
+    category: life_event
+    description: Last name changes back after divorce.
+    generation: Eligible only for people with MARRIAGE; later restore the original last name.
+    expected_outcome: Tier 1
+    unit: person
+    rate: 0.30
+  - code: LEGAL_FIRST_NAME_CHANGE
+    category: life_event
+    description: First name legally changed, often with a gender change.
+    generation: Change first name; with 50% probability also change gender.
+    expected_outcome: Tier 1 (one strong name)
+    unit: person
+    rate: 0.005
+  - code: ADOPTION_NAME_CHANGE
+    category: life_event
+    description: Child's last name changes on adoption.
+    generation: Eligible only for minors; change last name at a timeline point.
+    expected_outcome: Tier 1
+    unit: person
+    rate: 0.01
+  - code: GENDER_CHANGE_OR_ERROR
+    category: life_event
+    description: Gender value differs between records.
+    generation: Write a different or junk gender value on one record.
+    expected_outcome: Ignored as evidence
+    unit: record
+    rate: 0.02
+  - code: FULL_NAME_CHANGE
+    category: life_event
+    description: Both names change; SSN and DOB stay the same.
+    generation: Change first and last name at the same timeline point.
+    expected_outcome: "Known limitation: no match"
+    unit: person
+    rate: 0.002
+  - code: SSN_REPLACEMENT
+    category: life_event
+    description: SSA issues a new SSN.
+    generation: From a timeline point, new records carry a new unique SSN.
+    expected_outcome: Known limitation unless names and DOB carry it
+    unit: person
+    rate: 0.002
+
+  # --- Family and look-alike cases ----------------------------------------
+  - code: TWINS
+    category: family
+    description: Twins with same DOB and last name, different first names, near SSNs.
+    generation: Create a sibling with the same DOB and last name and an SSN differing in the last digits.
+    expected_outcome: BLOCKED_TWINS
+    unit: person
+    rate: 0.02
+  - code: MULTIPLES
+    category: family
+    description: Triplets or more.
+    generation: Create 2-4 siblings as for TWINS.
+    expected_outcome: BLOCKED_TWINS
+    unit: person
+    rate: 0.003
+  - code: NEWBORN_PARENT_SSN
+    category: family
+    description: Newborn recorded with a parent's SSN.
+    generation: Eligible only for newborns; a record carries a generated parent's SSN.
+    expected_outcome: BLOCKED_GENERATIONAL
+    unit: person
+    rate: 0.20
+  - code: NEWBORN_PLACEHOLDER
+    category: family
+    description: Newborn first recorded as "Baby Boy Smith", later updated with the real name.
+    generation: Eligible only for newborns; insert with a placeholder first name, update later.
+    expected_outcome: Placeholder name handling
+    unit: person
+    rate: 0.30
+  - code: JR_SR
+    category: family
+    description: Father and son with the same name, possibly sharing an SSN.
+    generation: Create a son with the father's names plus JR/SR suffixes; sometimes the son's record borrows the father's SSN.
+    expected_outcome: BLOCKED_SUFFIX or BLOCKED_GENERATIONAL
+    unit: person
+    rate: 0.01
+  - code: COMMON_NAME_SAME_DOB
+    category: family
+    description: Unrelated people with the same common name and DOB.
+    generation: Create a second person copying name and DOB, with a different SSN; some records omit the SSN.
+    expected_outcome: "No SSN: Tier 4 no-match (conservative)"
+    unit: person
+    rate: 0.005
+  - code: IDENTICAL_STRANGERS
+    category: family
+    description: Two unrelated people with identical values in all five fields.
+    generation: Create a second person copying all five fields.
+    expected_outcome: Known limitation
+    unit: person
+    rate: 0.001
+
+  # --- Fraud ----------------------------------------------------------------
+  - code: SSN_SHARED_FRAUD
+    category: fraud
+    description: A different person uses a victim's SSN with their own name and DOB.
+    generation: Create a fraudster whose records carry the victim's SSN.
+    expected_outcome: BLOCKED_SSN_CONFLICT
+    unit: person
+    rate: 0.005
+  - code: SSN_SHARED_MANY
+    category: fraud
+    description: Several fraudsters share one SSN.
+    generation: Create 3-8 fraudsters carrying one victim's SSN.
+    expected_outcome: BLOCKED_SSN_CONFLICT; oversized SSN block monitored
+    unit: person
+    rate: 0.001
+  - code: SYNTHETIC_IDENTITY
+    category: fraud
+    description: Real SSN combined with another person's name and DOB.
+    generation: Create an identity from person A's SSN and person B's name and DOB.
+    expected_outcome: BLOCKED_SSN_CONFLICT where detectable
+    unit: person
+    rate: 0.002
+  - code: FULL_IDENTITY_COPY
+    category: fraud
+    description: All five fields copied from a victim.
+    generation: Create a fraudster whose records copy all five fields.
+    expected_outcome: Known limitation
+    unit: person
+    rate: 0.001
+  - code: NEAR_MATCH_ATTACK
+    category: fraud
+    description: One character changed from a real identity.
+    generation: Copy a victim's fields and change one character in one field.
+    expected_outcome: Measured; conservative thresholds limit exposure
+    unit: person
+    rate: 0.002
+
+  # --- Source system and pipeline ----------------------------------------
+  - code: MIGRATION_REFORMAT
+    category: source_pipeline
+    description: Source migration changes formats, truncates names, introduces defaults.
+    generation: In the load, one source re-emits its records as updates with new formats and truncation.
+    expected_outcome: Standardization + normal tiers
+    unit: load
+    rate: 0.15
+  - code: SOURCE_ID_CHANGE
+    category: source_pipeline
+    description: Migration assigns new source_record_ids.
+    generation: In the load, a subset of one source's records is deleted and re-inserted under new IDs.
+    expected_outcome: Matching on attributes, not source IDs
+    unit: load
+    rate: 0.10
+  - code: SOURCE_ID_REUSE
+    category: source_pipeline
+    description: A deleted source ID is reused for a different person.
+    generation: Eligible only for deleted IDs; a later insert reuses the ID for another person.
+    expected_outcome: Ingestion treats post-delete insert as a new record version; matching decides
+    unit: event
+    rate: 0.20
+  - code: DUPLICATE_DELIVERY
+    category: source_pipeline
+    description: The same event delivered twice.
+    generation: Emit an exact copy of the event, including event_id.
+    expected_outcome: Deduplicated by event_id
+    unit: event
+    rate: 0.02
+  - code: OUT_OF_ORDER
+    category: source_pipeline
+    description: An older event arrives after a newer one.
+    generation: Move an event to a later load than a newer event for the same record.
+    expected_outcome: Ordered by sequence_no
+    unit: event
+    rate: 0.02
+  - code: LATE_AFTER_DELETE
+    category: source_pipeline
+    description: Update with an older sequence_no arrives after a delete.
+    generation: Eligible only for deleted records; emit a stale update after the delete.
+    expected_outcome: Ignored; record stays deleted
+    unit: event
+    rate: 0.10
+  - code: COLUMN_SHIFT
+    category: source_pipeline
+    description: A batch of rows shifted by one column.
+    generation: In the load, a contiguous batch of rows has values shifted one column right.
+    expected_outcome: Rejected with reason
+    unit: load
+    rate: 0.20
+  - code: ENCODING_CORRUPTION
+    category: source_pipeline
+    description: Mojibake (e.g. UTF-8 bytes decoded as Latin-1).
+    generation: Re-encode a name containing non-ASCII characters as mojibake.
+    expected_outcome: Rejected or flagged, per validation rules
+    unit: event
+    rate: 0.005
+  - code: BULK_REPLAY
+    category: source_pipeline
+    description: Source replays historical events.
+    generation: In the load, re-emit all events of one earlier load unchanged.
+    expected_outcome: Idempotent; no change
+    unit: load
+    rate: 0.10
