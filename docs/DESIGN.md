@@ -38,7 +38,8 @@ person-matching-pipeline/
 │   ├── DESIGN.md              # this file
 │   ├── DATA_GENERATION.md     # generator and edge case catalog
 │   ├── MATCHING_RULES.md      # rules and their defense
-│   └── RESULTS.md             # metrics per profile, known limitations
+│   ├── RESULTS.md             # metrics per profile, known limitations (generated)
+│   └── images/                # generated precision/recall chart
 ├── config/
 │   ├── generator.yaml         # presets, edge case rates, seed
 │   ├── matching.yaml          # profiles, thresholds, blocker settings
@@ -371,6 +372,8 @@ Run per load and per profile, reading truth only in `evaluation/`:
 - **Entity instability**: for each record present in consecutive loads, did its person_id change? Classify each change as *corrective* (the record's pairwise F1 against truth improved), *degrading* (worsened), or *neutral*. Report churn rate and the corrective/degrading split.
 - A summary table and a precision/recall chart across the three profiles for `docs/RESULTS.md`.
 
+`python -m pipeline evaluate` writes each load's results to `data/evaluation/<engine>/<profile>/load_NNNN/`, and `python -m pipeline results` renders `docs/RESULTS.md` and its chart from them. Exact definitions are in D-043.
+
 ## 15. Testing
 
 - **Unit tests** for every standardization function and comparison level.
@@ -572,6 +575,7 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Decision:* Twins whose first names match phonetically, by token or by nickname (GIULIA/CHLOE share Double Metaphone KL; JOHN/JANE share JN) and whose SSNs are near reach Tier 2. A scenario test pins this behavior. In the medium run 47 of about 4,800 twin pairs are affected. The rule is revisited in phase 6 with evaluation numbers.
 - *Alternatives:* Stricter name evidence in Tier 2; a broader twins blocker.
 - *Reason:* Changing a matching rule should be driven by measured precision and recall per edge case, which phase 6 provides.
+- *Revisited in phase 6 (kept, decided by the project owner):* On the medium run (conservative, final load) Tier 2 pairs whose first names match only phonetically are 221 same-person and 27 different-person pairs (89% precision, against about 98% for the rest of Tier 2). 22 of the 47 different-person twin pairs merged come through it, and 24 through a shared first-name token (AMIT ARJUN / ARJUN). Overall precision is 0.9916, so the rule stays and the cost is reported in RESULTS.md.
 
 **D-035 · 2026-11-11 · The twins blocker needs both first names** (decided by the project owner)
 - *Decision:* `BLOCKED_TWINS` fires only when both records have a first name. A placeholder name such as BABY GIRL is missing, not different.
@@ -617,6 +621,18 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Decision:* Each load is one `dbt build`. `python -m pipeline match-dbt` passes the load's inputs, its manifest date, and every profile parameter from `config/matching.yaml` as dbt vars. Each profile has its own DuckDB file under `data/warehouse/`. The clustering and reconciliation Python models each return one long table with a `row_type` column, which SQL models split into the output tables. Outputs are written with an explicit `COPY` post-hook, sorted, to `data/matched/dbt/<profile>/load_NNNN/`. The next load reads the previous load's `person_assignment` and `id_state` from there.
 - *Alternatives:* dbt-duckdb's `external` materialization, which writes a row of nulls for an empty table; incremental models holding ID history inside the warehouse.
 - *Reason:* Plain Parquet files per load are what the PySpark implementation and evaluation will read, so the engines exchange nothing but files. Rerunning a load overwrites its outputs and reads only the previous load, so reruns are idempotent.
+
+**D-043 · 2026-11-11 · Evaluation definitions** (outcome definition, generated results page and chart format decided by the project owner)
+- *Decision:*
+  - *Scope:* every live record of a load (its `person_assignment`) is scored against the truth in effect at that load. Tags count if the case affected the record at any point in its life.
+  - *Pairwise:* precision and recall over all pairs of live records, from the final person IDs. Pair counts come from group sizes, so no pairs are enumerated.
+  - *Per record:* a record whose cluster contains any other person's record is a **false merge**. Otherwise one missing any of its true partners is a **missed match**, and the rest are **correct**.
+  - *Per edge case:* tagged records with a true partner are split into correct / missed match / false merge. Tagged records without one (the only live record of their person) are reported separately, since only a false merge is possible for them. Pair precision and recall count each pair involving a tagged record once.
+  - *Stages:* blocking recall (true pairs compared), precision and recall of the pair decisions before clustering, and same-person counts per reason code, including `SKIPPED_TRANSITIVITY`.
+  - *Instability:* over record uids live in two consecutive loads. A changed person ID is corrective, degrading or neutral by the record's own pairwise F1 (1 for a correct singleton), each load against its own truth.
+  - *Results page:* `docs/RESULTS.md` is generated from the evaluation outputs of all three profiles, like `DATA_GENERATION.md`. The chart is a small SVG written by `evaluation/chart.py`.
+- *Alternatives:* pairwise metrics per edge case only; one strict correct/incorrect figure; matplotlib for the chart; writing RESULTS.md by hand.
+- *Reason:* Splitting false merges from missed matches shows which way a rule fails, and for most cases one direction is what matters (twins must be separated, typos joined). Without separating records that have no partner, the 60% of tagged records that are alone would make every case look good. A generated page cannot drift from the code, and the SVG writer needs no dependency and gives byte-identical output.
 
 ## 19. Publishing on GitHub
 

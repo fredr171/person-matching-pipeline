@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" width="640" height="420" role="img" aria-labelledby="t">
+<title id="t">Precision and recall by profile (load 12)</title>
+<style>
+  .surface { fill: #fcfcfb; }
+  .ink { fill: #0b0b0b; }
+  .ink-2 { fill: #52514e; }
+  .muted { fill: #898781; }
+  .grid { stroke: #e1e0d9; stroke-width: 1; }
+  .axis { stroke: #c3c2b7; stroke-width: 1; }
+  .ring { stroke: #fcfcfb; stroke-width: 2; }
+  .s0 { fill: #2a78d6; } .s1 { fill: #eb6834; } .s2 { fill: #1baf7a; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #1a1a19; }
+    .ink { fill: #f0efec; }
+    .ink-2 { fill: #c3c2b7; }
+    .grid { stroke: #2c2c2a; }
+    .axis { stroke: #383835; }
+    .ring { stroke: #1a1a19; }
+    .s0 { fill: #3987e5; } .s1 { fill: #d95926; } .s2 { fill: #199e70; }
+  }
+  text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+</style>
+<rect class="surface" width="640" height="420" rx="8"/>
+<text class="ink" x="72" y="28" font-size="16" font-weight="600">Precision and recall by profile (load 12)</text>
+<circle class="s0" cx="77" cy="44" r="5"/>
+<text class="ink-2" x="86" y="48" font-size="12">conservative</text>
+<circle class="s1" cx="201" cy="44" r="5"/>
+<text class="ink-2" x="210" y="48" font-size="12">balanced</text>
+<circle class="s2" cx="297" cy="44" r="5"/>
+<text class="ink-2" x="306" y="48" font-size="12">aggressive</text>
+<line class="grid" x1="72.0" x2="72.0" y1="56" y2="356"/>
+<text class="muted" x="72.0" y="374" font-size="11" text-anchor="middle">0.65</text>
+<line class="grid" x1="161.3" x2="161.3" y1="56" y2="356"/>
+<text class="muted" x="161.3" y="374" font-size="11" text-anchor="middle">0.70</text>
+<line class="grid" x1="250.7" x2="250.7" y1="56" y2="356"/>
+<text class="muted" x="250.7" y="374" font-size="11" text-anchor="middle">0.75</text>
+<line class="grid" x1="340.0" x2="340.0" y1="56" y2="356"/>
+<text class="muted" x="340.0" y="374" font-size="11" text-anchor="middle">0.80</text>
+<line class="grid" x1="429.3" x2="429.3" y1="56" y2="356"/>
+<text class="muted" x="429.3" y="374" font-size="11" text-anchor="middle">0.85</text>
+<line class="grid" x1="518.7" x2="518.7" y1="56" y2="356"/>
+<text class="muted" x="518.7" y="374" font-size="11" text-anchor="middle">0.90</text>
+<line class="grid" x1="608.0" x2="608.0" y1="56" y2="356"/>
+<text class="muted" x="608.0" y="374" font-size="11" text-anchor="middle">0.95</text>
+<line class="grid" x1="72" x2="608" y1="356.0" y2="356.0"/>
+<text class="muted" x="64" y="360.0" font-size="11" text-anchor="end">0.96</text>
+<line class="grid" x1="72" x2="608" y1="281.0" y2="281.0"/>
+<text class="muted" x="64" y="285.0" font-size="11" text-anchor="end">0.97</text>
+<line class="grid" x1="72" x2="608" y1="206.0" y2="206.0"/>
+<text class="muted" x="64" y="210.0" font-size="11" text-anchor="end">0.98</text>
+<line class="grid" x1="72" x2="608" y1="131.0" y2="131.0"/>
+<text class="muted" x="64" y="135.0" font-size="11" text-anchor="end">0.99</text>
+<line class="grid" x1="72" x2="608" y1="56.0" y2="56.0"/>
+<text class="muted" x="64" y="60.0" font-size="11" text-anchor="end">1.00</text>
+<line class="axis" x1="72" x2="608" y1="356" y2="356"/>
+<line class="axis" x1="72" x2="72" y1="56" y2="356"/>
+<text class="ink-2" x="340.0" y="400" font-size="12" text-anchor="middle">Pairwise recall (axis from 0.65)</text>
+<text class="ink-2" font-size="12" text-anchor="middle" transform="translate(20 206.0) rotate(-90)">Pairwise precision (axis from 0.96)</text>
+<circle class="s0 ring" cx="179.6" cy="119.4" r="6"><title>conservative: precision 0.9916, recall 0.7102</title></circle>
+<text class="ink" x="191.6" y="115.4" font-size="12" text-anchor="start">conservative</text>
+<text class="ink-2" x="191.6" y="130.4" font-size="11" text-anchor="start">P 0.992 · R 0.710</text>
+<circle class="s1 ring" cx="182.8" cy="119.9" r="6"><title>balanced: precision 0.9915, recall 0.7120</title></circle>
+<text class="ink" x="170.8" y="115.9" font-size="12" text-anchor="end">balanced</text>
+<text class="ink-2" x="170.8" y="130.9" font-size="11" text-anchor="end">P 0.991 · R 0.712</text>
+<circle class="s2 ring" cx="529.3" cy="252.7" r="6"><title>aggressive: precision 0.9738, recall 0.9060</title></circle>
+<text class="ink" x="517.3" y="248.7" font-size="12" text-anchor="end">aggressive</text>
+<text class="ink-2" x="517.3" y="263.7" font-size="11" text-anchor="end">P 0.974 · R 0.906</text>
+</svg>

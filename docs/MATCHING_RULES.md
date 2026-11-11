@@ -174,8 +174,14 @@ These are generated deliberately and measured in [RESULTS.md](RESULTS.md):
 
 - **Twins with similar first names.** Twins whose SSNs are near and whose first names match
   phonetically, by token or by nickname reach Tier 2. Examples: JOHN/JANE (Double Metaphone JN),
-  GIULIA/CHLOE (KL), AMIT ARJUN/ARJUN. In the medium run this affects 47 of about 4,800 twin
-  pairs. It is kept on purpose until evaluation measures the trade-off (D-034).
+  GIULIA/CHLOE (KL), AMIT ARJUN/ARJUN. In the medium run this merges 47 twin pairs. Making
+  Tier 2 refuse phonetic-only first names would stop 27 false pairs but lose 221 true ones,
+  so the rule is kept (D-034).
+- **January 1 DOBs.** A default January 1 DOB differs from the real date in two or more
+  digits, so it is DIFFERENT, not NEAR, and such records almost never match their other
+  records (pair recall 0.04 in the medium run).
+- **Records without a usable SSN or DOB.** In the conservative profile they can only match
+  through Tier 4, which is off, so most of the recall gap comes from them.
 - **Identical values.** Two people with identical five fields, or a full copy of someone's
   identity, are indistinguishable.
 - **Full name change, or a new SSN together with a name change.** No field is left to carry the match.

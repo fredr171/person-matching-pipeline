@@ -2,11 +2,12 @@
 
 <!-- CI badge goes here once the GitHub repository exists. -->
 
-> **Status: under construction.** Build phases 1–5 of 8 are complete: the synthetic data
-> generator, CDC ingestion, the Python reference rules, and the full dbt-on-DuckDB matching
+> **Status: under construction.** Build phases 1–6 of 8 are complete: the synthetic data
+> generator, CDC ingestion, the Python reference rules, the full dbt-on-DuckDB matching
 > pipeline with constrained clustering and stable person IDs
-> ([matching rules](docs/MATCHING_RULES.md)). Evaluation, PySpark and results arrive in later
-> phases; see [build phases](docs/DESIGN.md#17-build-phases).
+> ([matching rules](docs/MATCHING_RULES.md)), and evaluation against ground truth
+> ([results](docs/RESULTS.md)). The PySpark implementation and the large-preset run arrive in
+> later phases; see [build phases](docs/DESIGN.md#17-build-phases).
 
 **The problem.** The same person shows up in many source systems under slightly
 different identities: a typo in the SSN, a nickname, a married name, a date of birth
@@ -29,7 +30,12 @@ pipeline. It is designed so that every decision can be explained and measured:
 - **Evaluation against ground truth** reports pairwise precision/recall, outcomes per
   edge case, and ID churn.
 
-**Headline results:** *coming in phase 6.*
+**Headline results** (medium preset: 128,000 live records after 13 monthly loads,
+[full results](docs/RESULTS.md)): the default conservative profile reaches pairwise
+**precision 0.992** at recall 0.710. The aggressive profile raises recall to 0.906 at
+precision 0.974, with about four times as many falsely merged records. About 0.1% of
+person IDs change per load, and over 90% of those changes move a record closer to the
+truth.
 
 ## Pipeline
 
@@ -58,6 +64,7 @@ make check-config
 make generate                      # small preset: 13 monthly loads in a few seconds
 make ingest                        # apply the CDC events to a current-state table
 make match-dbt                     # match every load with dbt + DuckDB (about 2 minutes)
+make evaluate                      # score each load against ground truth
 make test
 ```
 
@@ -70,6 +77,7 @@ python -m pipeline check-config
 python -m pipeline generate --preset small
 python -m pipeline ingest
 python -m pipeline match-dbt --profile conservative
+python -m pipeline evaluate --profile conservative
 python -m pytest
 ```
 
@@ -104,7 +112,32 @@ Each decision links to its full reasoning in the [decision log](docs/DESIGN.md#1
 
 ## Results
 
-*Coming in phases 6 and 8.*
+[docs/RESULTS.md](docs/RESULTS.md) is generated from the evaluation outputs. To reproduce it
+(about 40 minutes on a laptop):
+
+```bash
+make generate PRESET=medium
+make ingest
+make results                       # match and evaluate all three profiles, then render
+```
+
+What the numbers say, on the medium preset:
+
+- **Precision holds; recall is the price.** In the conservative profile, 87% of the true
+  pairs it misses involve a record with no usable SSN or DOB (placeholders, ITINs, migration
+  defaults). Those can only match through Tier 4, which the conservative profile turns off.
+- **The aggressive profile's extra matches are mostly right, but not all.** Tier 4 pairs
+  are 92.5% the same person. The rest are mostly COMMON_NAME_SAME_DOB: 1,814 falsely merged
+  records, against 9 in the conservative profile.
+- **Most remaining false merges cannot be fixed with five fields.** Of 788 falsely merged
+  records in the conservative profile, 720 are full identity copies, identical strangers or
+  near-match attacks.
+- **Blockers protect, at a small cost.** `BLOCKED_TWINS` separates 6,781 pairs of different
+  people and blocks 87 same-person pairs. Clustering refuses 268 joins, almost all between
+  records of one person, to keep a blocked pair apart.
+- **Twins still merge sometimes.** 47 different-person twin pairs reach Tier 2 through a
+  phonetic or shared-token first name. The rule was kept after measuring the alternative
+  (D-034).
 
 ## Known limitations
 
