@@ -48,16 +48,80 @@ records_per_person:
   tail_min: 6
   tail_max: 15
 
-# Ages at the initial load, in years. Newborns (age 0) are generated explicitly.
+# Load 0 is dated simulation_start; each refresh is one month later (section 3.6).
+simulation_start: 2025-01-01
+
+# Ages at the initial load, in years. Newborns (born within the year before
+# their first record) are generated explicitly via newborn_share.
 population:
-  min_age_years: 0
+  min_age_years: 1
   max_age_years: 100
   newborn_share: 0.02
+  # Share of people born on Feb 29, exaggerated so DOB_LEAP_DAY is measurable.
+  leap_day_birth_share: 0.01
+  gender_mix: {F: 0.495, M: 0.495, X: 0.01}
+  # Name culture mix; names come from generator/data/*.csv (D-014).
+  culture_mix:
+    anglo: 0.55
+    hispanic: 0.20
+    east_asian: 0.08
+    south_asian: 0.07
+    arabic: 0.05
+    european: 0.05
+  middle_name_rate: 0.60
+  # Hispanic people with a two-part surname (paternal + maternal).
+  compound_surname_rate: 0.40
+  # Men with a generational suffix (JR, III, ...) outside JR_SR pairs.
+  suffix_rate: 0.02
 
+# Per-source formatting is baseline noise, not an edge case: real sources
+# disagree on formats all the time. Standardization must handle all of these.
+#   name_case:  title | upper | mixed (per record: title, upper or lower)
+#   dob_format: iso (YYYY-MM-DD) | us (MM/DD/YYYY) | compact (YYYYMMDD)
+#   ssn_format: dashed (123-45-6789) | digits (123456789) | spaced (123 45 6789)
 source_systems:
-  - {name: EHR_A, weight: 0.45}
-  - {name: CLAIMS_B, weight: 0.35, family_name_first: true}
-  - {name: LAB_C, weight: 0.20}
+  - name: EHR_A
+    weight: 0.45
+    name_case: title
+    dob_format: iso
+    ssn_format: dashed
+    ssn_missing_rate: 0.05
+    gender_unknown_value: ""
+    gender_missing_rate: 0.02
+  - name: CLAIMS_B
+    weight: 0.35
+    family_name_first: true
+    name_case: upper
+    dob_format: us
+    ssn_format: digits
+    ssn_missing_rate: 0.02
+    gender_unknown_value: U
+    gender_missing_rate: 0.03
+  - name: LAB_C
+    weight: 0.20
+    name_case: mixed
+    dob_format: compact
+    ssn_format: spaced
+    ssn_missing_rate: 0.30
+    gender_unknown_value: ""
+    gender_missing_rate: 0.10
+
+# Parameters of the source-system and pipeline edge cases.
+pipeline_cases:
+  # MIGRATION_REFORMAT: the migrated source switches to these settings.
+  migration:
+    name_case: upper
+    dob_format: next   # next in the cycle iso -> us -> compact -> iso
+    ssn_format: next   # next in the cycle dashed -> digits -> spaced -> dashed
+    first_name_max_length: 10
+    last_name_max_length: 12
+    # Defaults the new system writes for missing values.
+    default_ssn: "000000000"
+    default_gender: U
+  # SOURCE_ID_CHANGE: share of the source's live records re-keyed.
+  source_id_change_share: 0.10
+  # COLUMN_SHIFT: share of the load's insert/update events in the shifted batch.
+  column_shift_batch_share: 0.01
 
 edge_cases:
   # --- Identifier errors and placeholders ---------------------------------
@@ -185,17 +249,17 @@ edge_cases:
   - code: NAME_NICKNAME
     category: name
     description: Nickname used instead of the formal name (Dave/David, Bob/Robert, Peggy/Margaret).
-    generation: Replace the first name with a variant from nicknames.csv.
+    generation: Eligible only when the first name has a nickname in nicknames.csv; replace it with one.
     expected_outcome: Strong name via nickname table
     unit: record
-    rate: 0.04
+    rate: 0.15
   - code: NAME_PHONETIC
     category: name
     description: Phonetically equivalent spelling (Catherine/Katherine, Smith/Smyth).
-    generation: Replace a name with a curated sound-alike spelling.
+    generation: Eligible only for names with a curated sound-alike in generator/data/phonetic_variants.csv; swap to it.
     expected_outcome: Strong name via phonetic
     unit: record
-    rate: 0.02
+    rate: 0.25
   - code: NAME_TRANSLITERATION
     category: name
     description: Transliteration variant (Mohammed/Muhammad/Mohamed).
@@ -220,10 +284,10 @@ edge_cases:
   - code: NAME_MIDDLE_IN_FIRST
     category: name
     description: Middle name included in the first name ("Mary Ann").
-    generation: Append a middle name to first_name.
+    generation: Eligible only for people with a middle name; append it to first_name.
     expected_outcome: Token match
     unit: record
-    rate: 0.02
+    rate: 0.10
   - code: NAME_CONCATENATED
     category: name
     description: Two-part name written without a space (MaryAnn vs Mary Ann).
@@ -248,7 +312,7 @@ edge_cases:
   - code: NAME_COMPOUND_SURNAME
     category: name
     description: Compound surname recorded in full or in part (Garcia Lopez vs Lopez).
-    generation: Eligible only for compound surnames; keep both parts or only one.
+    generation: Eligible only for people with a two-part surname; the record keeps only one part (other records keep both).
     expected_outcome: Token match
     unit: record
     rate: 0.30
@@ -334,10 +398,10 @@ edge_cases:
   - code: SSN_REPLACEMENT
     category: life_event
     description: SSA issues a new SSN.
-    generation: From a timeline point, new records carry a new unique SSN.
+    generation: Eligible only for people with records in at least two loads; from a timeline point, new records carry a new unique SSN.
     expected_outcome: Known limitation unless names and DOB carry it
     unit: person
-    rate: 0.002
+    rate: 0.02
 
   # --- Family and look-alike cases ----------------------------------------
   - code: TWINS
@@ -378,10 +442,10 @@ edge_cases:
   - code: COMMON_NAME_SAME_DOB
     category: family
     description: Unrelated people with the same common name and DOB.
-    generation: Create a second person copying name and DOB, with a different SSN; some records omit the SSN.
+    generation: Eligible only for people whose first and last names are among the most common in their culture; create a second person copying name and DOB, with a different SSN.
     expected_outcome: "No SSN: Tier 4 no-match (conservative)"
     unit: person
-    rate: 0.005
+    rate: 0.05
   - code: IDENTICAL_STRANGERS
     category: family
     description: Two unrelated people with identical values in all five fields.
@@ -431,10 +495,10 @@ edge_cases:
   - code: MIGRATION_REFORMAT
     category: source_pipeline
     description: Source migration changes formats, truncates names, introduces defaults.
-    generation: In the load, one source re-emits its records as updates with new formats and truncation.
+    generation: In the load, one not-yet-migrated source re-emits all its live records as updates with new formats, field length limits and default values.
     expected_outcome: Standardization + normal tiers
     unit: load
-    rate: 0.15
+    rate: 0.08
   - code: SOURCE_ID_CHANGE
     category: source_pipeline
     description: Migration assigns new source_record_ids.
@@ -459,10 +523,10 @@ edge_cases:
   - code: OUT_OF_ORDER
     category: source_pipeline
     description: An older event arrives after a newer one.
-    generation: Move an event to a later load than a newer event for the same record.
+    generation: Eligible only for updates that change the record; the update's predecessor (older sequence_no, previous values) is delivered one load late.
     expected_outcome: Ordered by sequence_no
     unit: event
-    rate: 0.02
+    rate: 0.20
   - code: LATE_AFTER_DELETE
     category: source_pipeline
     description: Update with an older sequence_no arrives after a delete.
@@ -480,10 +544,10 @@ edge_cases:
   - code: ENCODING_CORRUPTION
     category: source_pipeline
     description: Mojibake (e.g. UTF-8 bytes decoded as Latin-1).
-    generation: Re-encode a name containing non-ASCII characters as mojibake.
+    generation: Eligible only for events whose names contain non-ASCII characters; write the names as mojibake.
     expected_outcome: Rejected or flagged, per validation rules
     unit: event
-    rate: 0.005
+    rate: 0.05
   - code: BULK_REPLAY
     category: source_pipeline
     description: Source replays historical events.

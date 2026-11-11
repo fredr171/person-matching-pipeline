@@ -9,6 +9,7 @@ wrong data or matches several stages later.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,13 @@ from pipeline import paths
 EDGE_CASE_UNITS: frozenset[str] = frozenset({"person", "record", "event", "load"})
 EDGE_CASE_CATEGORIES: frozenset[str] = frozenset(
     {"identifier", "name", "life_event", "family", "fraud", "source_pipeline"}
+)
+NAME_CASES: frozenset[str] = frozenset({"title", "upper", "mixed"})
+DOB_FORMATS: tuple[str, ...] = ("iso", "us", "compact")
+SSN_FORMATS: tuple[str, ...] = ("dashed", "digits", "spaced")
+GENDERS: frozenset[str] = frozenset({"M", "F", "X"})
+CULTURES: frozenset[str] = frozenset(
+    {"anglo", "hispanic", "east_asian", "south_asian", "arabic", "european"}
 )
 # Blocking keys from DESIGN.md section 6. Each implementation maps these names
 # to its own expression; an unknown name is a config error, not a silent no-op.
@@ -86,20 +94,52 @@ class RecordsPerPerson:
 
 @dataclass(frozen=True)
 class Population:
-    """Age range of the generated population at the initial load."""
+    """Shape of the generated population (ages, genders, name cultures)."""
 
     min_age_years: int
     max_age_years: int
     newborn_share: float
+    leap_day_birth_share: float
+    gender_mix: dict[str, float]
+    culture_mix: dict[str, float]
+    middle_name_rate: float
+    compound_surname_rate: float
+    suffix_rate: float
 
 
 @dataclass(frozen=True)
 class SourceSystem:
-    """A simulated source system feeding CDC events."""
+    """A simulated source system feeding CDC events, with its formatting habits."""
 
     name: str
     weight: float
     family_name_first: bool
+    name_case: str
+    dob_format: str
+    ssn_format: str
+    ssn_missing_rate: float
+    gender_unknown_value: str
+    gender_missing_rate: float
+
+
+@dataclass(frozen=True)
+class Migration:
+    """What a source looks like after MIGRATION_REFORMAT."""
+
+    name_case: str
+    first_name_max_length: int
+    last_name_max_length: int
+    default_ssn: str
+    default_gender: str
+
+
+@dataclass(frozen=True)
+class PipelineCases:
+    """Parameters of the source-system and pipeline edge cases."""
+
+    migration: Migration
+    source_id_change_share: float
+    column_shift_batch_share: float
 
 
 @dataclass(frozen=True)
@@ -121,12 +161,21 @@ class GeneratorConfig:
 
     seed: int
     default_preset: str
+    simulation_start: date
     presets: dict[str, Preset]
     refresh_mix: RefreshMix
     records_per_person: RecordsPerPerson
     population: Population
     source_systems: tuple[SourceSystem, ...]
+    pipeline_cases: PipelineCases
     edge_cases: tuple[EdgeCase, ...]
+
+    def source(self, name: str) -> SourceSystem:
+        """Return the named source system."""
+        for source in self.source_systems:
+            if source.name == name:
+                return source
+        raise ConfigError(f"Unknown source system {name!r}")
 
     def preset(self, name: str | None = None) -> Preset:
         """Return the named preset, or the default preset when ``name`` is None."""
@@ -307,34 +356,18 @@ def load_generator_config(path: Path = paths.GENERATOR_CONFIG) -> GeneratorConfi
     _check_sums_to_one([*counts.values(), tail_probability], "records_per_person")
     records_per_person = RecordsPerPerson(counts, tail_probability, tail_min, tail_max)
 
-    pop_raw = _require(raw, "population", "generator config")
-    population = Population(
-        min_age_years=_check_positive_int(
-            _require(pop_raw, "min_age_years", "population"), "population.min_age_years", True
-        ),
-        max_age_years=_check_positive_int(
-            _require(pop_raw, "max_age_years", "population"), "population.max_age_years"
-        ),
-        newborn_share=_check_probability(
-            _require(pop_raw, "newborn_share", "population"), "population.newborn_share"
-        ),
-    )
-    if population.min_age_years >= population.max_age_years:
-        raise ConfigError("population.min_age_years must be below max_age_years")
+    population = _parse_population(_require(raw, "population", "generator config"))
 
-    sources = tuple(
-        SourceSystem(
-            name=_require(s, "name", "source_systems entry"),
-            weight=_check_probability(
-                _require(s, "weight", "source_systems entry"), "source_systems.weight"
-            ),
-            family_name_first=bool(s.get("family_name_first", False)),
-        )
-        for s in _require(raw, "source_systems", "generator config")
-    )
+    sources = tuple(_parse_source(s) for s in _require(raw, "source_systems", "generator config"))
     if len({s.name for s in sources}) != len(sources):
         raise ConfigError("source_systems names must be unique")
     _check_sums_to_one([s.weight for s in sources], "source_systems weights")
+
+    pipeline_cases = _parse_pipeline_cases(_require(raw, "pipeline_cases", "generator config"))
+
+    simulation_start = _require(raw, "simulation_start", "generator config")
+    if not isinstance(simulation_start, date):
+        raise ConfigError("simulation_start must be a date (YYYY-MM-DD)")
 
     edge_cases = tuple(_parse_edge_case(e) for e in _require(raw, "edge_cases", "generator config"))
     codes = [e.code for e in edge_cases]
@@ -347,12 +380,112 @@ def load_generator_config(path: Path = paths.GENERATOR_CONFIG) -> GeneratorConfi
     return GeneratorConfig(
         seed=seed,
         default_preset=default_preset,
+        simulation_start=simulation_start,
         presets=presets,
         refresh_mix=refresh_mix,
         records_per_person=records_per_person,
         population=population,
         source_systems=sources,
+        pipeline_cases=pipeline_cases,
         edge_cases=edge_cases,
+    )
+
+
+def _parse_mix(raw: Any, allowed: frozenset[str], where: str) -> dict[str, float]:
+    if not isinstance(raw, dict) or not raw:
+        raise ConfigError(f"{where} must be a non-empty mapping")
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        raise ConfigError(f"{where}: unknown keys {unknown}; expected from {sorted(allowed)}")
+    mix = {key: _check_probability(value, f"{where}.{key}") for key, value in raw.items()}
+    _check_sums_to_one(list(mix.values()), where)
+    return mix
+
+
+def _parse_population(raw: dict[str, Any]) -> Population:
+    def probability(key: str) -> float:
+        return _check_probability(_require(raw, key, "population"), f"population.{key}")
+
+    population = Population(
+        min_age_years=_check_positive_int(
+            _require(raw, "min_age_years", "population"), "population.min_age_years", True
+        ),
+        max_age_years=_check_positive_int(
+            _require(raw, "max_age_years", "population"), "population.max_age_years"
+        ),
+        newborn_share=probability("newborn_share"),
+        leap_day_birth_share=probability("leap_day_birth_share"),
+        gender_mix=_parse_mix(_require(raw, "gender_mix", "population"), GENDERS, "gender_mix"),
+        culture_mix=_parse_mix(_require(raw, "culture_mix", "population"), CULTURES, "culture_mix"),
+        middle_name_rate=probability("middle_name_rate"),
+        compound_surname_rate=probability("compound_surname_rate"),
+        suffix_rate=probability("suffix_rate"),
+    )
+    if population.min_age_years >= population.max_age_years:
+        raise ConfigError("population.min_age_years must be below max_age_years")
+    return population
+
+
+def _parse_choice(value: Any, allowed: Any, where: str) -> str:
+    if value not in allowed:
+        raise ConfigError(f"{where} must be one of {sorted(allowed)}, got {value!r}")
+    return value
+
+
+def _parse_source(raw: dict[str, Any]) -> SourceSystem:
+    name = _require(raw, "name", "source_systems entry")
+    where = f"source_systems.{name}"
+    return SourceSystem(
+        name=name,
+        weight=_check_probability(_require(raw, "weight", where), f"{where}.weight"),
+        family_name_first=bool(raw.get("family_name_first", False)),
+        name_case=_parse_choice(_require(raw, "name_case", where), NAME_CASES, where),
+        dob_format=_parse_choice(_require(raw, "dob_format", where), DOB_FORMATS, where),
+        ssn_format=_parse_choice(_require(raw, "ssn_format", where), SSN_FORMATS, where),
+        ssn_missing_rate=_check_probability(
+            _require(raw, "ssn_missing_rate", where), f"{where}.ssn_missing_rate"
+        ),
+        gender_unknown_value=_parse_choice(
+            raw.get("gender_unknown_value", ""), {"", "U"}, f"{where}.gender_unknown_value"
+        ),
+        gender_missing_rate=_check_probability(
+            _require(raw, "gender_missing_rate", where), f"{where}.gender_missing_rate"
+        ),
+    )
+
+
+def _parse_pipeline_cases(raw: dict[str, Any]) -> PipelineCases:
+    m = _require(raw, "migration", "pipeline_cases")
+    where = "pipeline_cases.migration"
+    for key in ("dob_format", "ssn_format"):
+        if m.get(key) != "next":
+            raise ConfigError(f"{where}.{key} must be 'next' (rotate to the next format)")
+    default_ssn = str(_require(m, "default_ssn", where))
+    if not (default_ssn.isdigit() and len(default_ssn) == 9):
+        raise ConfigError(f"{where}.default_ssn must be nine digits")
+    migration = Migration(
+        name_case=_parse_choice(_require(m, "name_case", where), NAME_CASES, where),
+        first_name_max_length=_check_positive_int(
+            _require(m, "first_name_max_length", where), f"{where}.first_name_max_length"
+        ),
+        last_name_max_length=_check_positive_int(
+            _require(m, "last_name_max_length", where), f"{where}.last_name_max_length"
+        ),
+        default_ssn=default_ssn,
+        default_gender=_parse_choice(
+            _require(m, "default_gender", where), {"U", "M", "F", "X"}, where
+        ),
+    )
+    return PipelineCases(
+        migration=migration,
+        source_id_change_share=_check_probability(
+            _require(raw, "source_id_change_share", "pipeline_cases"),
+            "pipeline_cases.source_id_change_share",
+        ),
+        column_shift_batch_share=_check_probability(
+            _require(raw, "column_shift_batch_share", "pipeline_cases"),
+            "pipeline_cases.column_shift_batch_share",
+        ),
     )
 
 

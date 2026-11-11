@@ -1,5 +1,5 @@
 # Generated data is never committed; regenerate with `make generate`.
-data/
+/data/
 
 # Python
 __pycache__/
