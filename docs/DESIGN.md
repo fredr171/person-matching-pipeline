@@ -1,6 +1,6 @@
 # Person Matching: Design Specification
 
-This document is the source of truth for the project. Code, tests, and the README must agree with it. If an implementation choice conflicts with this spec, update the spec first and record why in the decision log (section 16).
+This document is the source of truth for the project. Code, tests, and the README must agree with it. If an implementation choice conflicts with this spec, update the spec first and record why in the decision log (section 18).
 
 ## 1. Goals
 
@@ -22,10 +22,18 @@ Non-goals: a UI, real PII, probabilistic/ML matching, and a human review workflo
 - PySpark in local mode for the distributed implementation.
 - Parquet for all data files. YAML for configuration. pytest for tests.
 - Everything must run locally from a fresh clone with no cloud account.
+- Dependencies are pinned exactly in `pyproject.toml`, with the full transitive set frozen in `requirements-lock.txt` (D-012).
+- The `Makefile` is a thin wrapper over a Python CLI (`python -m pipeline <command>`), so every step also runs on Windows without `make` (D-010).
+- PySpark needs Java 17+. On Windows, Spark is supported through WSL; Linux CI is the reference environment for the Spark run (D-011).
+- Reference CSVs are read as text by every engine (dbt via DuckDB `read_csv`, Python via `csv`), never with type inference (D-018).
 
 ```
-person-matching/
+person-matching-pipeline/
 ├── README.md
+├── LICENSE                    # MIT
+├── pyproject.toml             # exact dependency pins, tool config
+├── requirements-lock.txt      # full frozen dependency set
+├── .github/workflows/ci.yml
 ├── docs/
 │   ├── DESIGN.md              # this file
 │   ├── DATA_GENERATION.md     # generator and edge case catalog
@@ -34,10 +42,12 @@ person-matching/
 ├── config/
 │   ├── generator.yaml         # presets, edge case rates, seed
 │   ├── matching.yaml          # profiles, thresholds, blocker settings
-│   └── reference/             # nicknames.csv, placeholders.csv, particles.csv
+│   └── reference/             # nicknames.csv, placeholders.csv, particles.csv, suffixes.csv
+├── pipeline/                  # shared plumbing: config + reference loaders, paths, CLI
 ├── generator/                 # synthetic data + CDC event generator
 ├── ingestion/                 # CDC -> current-state table
-├── matching_dbt/              # dbt project (DuckDB)
+├── standardization/           # Python reference implementation + shared similarity functions
+├── matching_dbt/              # dbt project (DuckDB); seeds read from config/reference/
 ├── matching_spark/            # PySpark implementation
 ├── clustering/                # shared constrained clustering + ID reconciliation
 ├── evaluation/                # metrics against ground truth
@@ -295,6 +305,8 @@ Pairwise matches are not transitive by default. Clustering is constrained and de
 
 Implementation: standardization, blocking, comparison, tiers, and blockers are SQL in dbt and DataFrame operations in PySpark. The constrained clustering step is sequential by nature, so both implementations call the **same shared Python function** in `clustering/`: a dbt Python model on DuckDB, and `groupBy(component).applyInPandas` in PySpark. This is a deliberate, documented decision: identical logic beats forcing a greedy algorithm into SQL.
 
+The same reasoning applies to the two string-similarity primitives that the engines do not both provide natively: Jaro-Winkler (DuckDB has it, Spark does not) and Double Metaphone (neither has it). Both are implemented once in `standardization/similarity.py` and registered as a DuckDB UDF for dbt and as a pandas UDF in PySpark. Everything else stays in SQL / DataFrame operations (D-009).
+
 ## 11. Stable person ID reconciliation
 
 Matching recomputes everything each load. IDs are then reconciled against the previous load so only records whose cluster changed get new IDs.
@@ -370,7 +382,103 @@ Each phase ends with passing tests and updated docs.
 
 ## 18. Decision log
 
-Record each significant decision with date, decision, alternatives considered, and reason. Seed it with: no human review; no-match default; Tier 1 one-strong-name rule; full rematch each load; ID reconciliation rules; shared Python clustering; conservative default profile; exaggerated edge case rates.
+Record each significant decision with date, decision, alternatives considered, and reason. Entries are never deleted; a reversed decision gets a new entry that supersedes the old one.
+
+**D-001 · 2026-11-11 · No human review queue**
+- *Decision:* Every pair is decided automatically; uncertain pairs become no-match with a reason code.
+- *Alternatives:* A review queue for borderline pairs (the common production pattern).
+- *Reason:* A queue hides the hard cases behind a human. Storing every decision with a reason code keeps edge cases queryable and makes the matcher's behaviour fully measurable against ground truth.
+
+**D-002 · 2026-11-11 · Uncertain means no-match**
+- *Decision:* Any pair not meeting a tier is `NO_MATCH_INSUFFICIENT`.
+- *Alternatives:* Scoring models that match above a probability cut-off.
+- *Reason:* In the target domain (healthcare) a false merge is far more harmful than a duplicate. Duplicates can be merged later; a merged chart can cause clinical harm.
+
+**D-003 · 2026-11-11 · Tier 1 requires only one strong name**
+- *Decision:* Exact SSN + exact DOB + one STRONG name is a match.
+- *Alternatives:* Require both names strong for every tier.
+- *Reason:* Marriage, divorce, adoption and legal first-name changes alter exactly one name. Exact SSN and DOB together are rare enough to carry the match; twins (different SSNs) and parent/child (different DOBs) cannot reach Tier 1, and blockers catch SSN fraud.
+
+**D-004 · 2026-11-11 · Full rematch each load**
+- *Decision:* Matching recomputes all pairs every load; stability comes from ID reconciliation, not from incremental matching.
+- *Alternatives:* Incremental matching of only new/changed records against existing clusters.
+- *Reason:* Full rematch is simpler, order-independent and makes corrections (e.g. SSN_CORRECTED) automatically reflected. It is affordable at the target scales, and reconciliation keeps IDs stable.
+
+**D-005 · 2026-11-11 · ID reconciliation rules (section 11)**
+- *Decision:* Majority/oldest-ID-survives reconciliation with a retire-only crosswalk.
+- *Alternatives:* Always mint new IDs; keep the ID of the lowest record key.
+- *Reason:* Downstream systems hold person IDs. Only changes justified by the data should change them, and every change must be traceable through the crosswalk. "Oldest survives" is deterministic and favours the ID most likely to be referenced elsewhere.
+
+**D-006 · 2026-11-11 · Shared Python clustering**
+- *Decision:* Both implementations call one Python function for constrained clustering.
+- *Alternatives:* Recursive SQL / iterative DataFrame implementations per engine.
+- *Reason:* Greedy constrained union-find is inherently sequential. Two independent implementations would be hard to keep identical; one shared function guarantees parity by construction.
+
+**D-007 · 2026-11-11 · Conservative default profile**
+- *Decision:* The default profile is `conservative` (strong ≥ 0.95, Tier 4 off).
+- *Alternatives:* `balanced` as default.
+- *Reason:* Consistent with D-002 and the healthcare framing. Other profiles exist to show the precision/recall trade-off.
+
+**D-008 · 2026-11-11 · Exaggerated edge case rates**
+- *Decision:* Edge case rates in `config/generator.yaml` are far higher than real-world rates.
+- *Alternatives:* Realistic rates.
+- *Reason:* At realistic rates many edge cases would appear a handful of times or never, so per-edge-case metrics would be noise. Headline metrics are therefore not a forecast of production accuracy; `RESULTS.md` says so.
+
+**D-009 · 2026-11-11 · Shared Python similarity functions**
+- *Decision:* Jaro-Winkler (rapidfuzz) and Double Metaphone (`metaphone` package) are implemented once in `standardization/similarity.py` and registered as a DuckDB UDF (dbt) and a pandas UDF (PySpark).
+- *Alternatives:* DuckDB's native `jaro_winkler_similarity` in dbt plus a UDF in Spark; Soundex instead of Double Metaphone.
+- *Reason:* Spark has no Jaro-Winkler and neither engine has Double Metaphone. Two different Jaro-Winkler implementations can disagree in the last decimal places, which flips decisions at the 0.95 threshold and breaks parity. One implementation removes that risk, as in D-006.
+
+**D-010 · 2026-11-11 · Makefile wraps a Python CLI**
+- *Decision:* Every Makefile target calls `python -m pipeline <command>`.
+- *Alternatives:* Logic in the Makefile; require `make` on Windows.
+- *Reason:* `make` is not available on Windows by default. The CLI gives one portable entry point, and the Makefile stays a convenience for Linux/macOS and CI.
+
+**D-011 · 2026-11-11 · PySpark on Windows via WSL**
+- *Decision:* The Spark implementation is supported on Linux/macOS and on Windows via WSL; Linux CI is the reference run.
+- *Alternatives:* Bundle `winutils.exe`/`HADOOP_HOME` setup instructions; Docker.
+- *Reason:* Native Windows Spark needs Hadoop binaries to write files, which is brittle and unrelated to the project's purpose. WSL adds no project-specific setup.
+- *Update (phase 1):* In-memory Spark jobs do run on native Windows once the driver is bound to `127.0.0.1` (Spark rejects hostnames containing underscores), so the toolchain smoke test runs everywhere. Writing files still needs winutils; this will be revisited in phase 7.
+
+**D-012 · 2026-11-11 · pip with exact pins and a lock file**
+- *Decision:* Direct dependencies pinned with `==` in `pyproject.toml`; full transitive set frozen in `requirements-lock.txt`.
+- *Alternatives:* uv / Poetry lock files.
+- *Reason:* Works with the pip that ships with Python, so a fresh clone needs no extra tool.
+
+**D-013 · 2026-11-11 · Layout additions**
+- *Decision:* Added `pipeline/` (config, reference loaders, paths, CLI), `standardization/` (Python reference for section 5, plus D-009 functions) and `config/reference/suffixes.csv`. Moved this file to `docs/` as the layout specifies.
+- *Alternatives:* Put shared code in `ingestion/`; hardcode suffix forms.
+- *Reason:* Shared plumbing should not live inside one pipeline stage. Suffix forms are reference data like particles and belong where both implementations read them.
+
+**D-014 · 2026-11-11 · No Faker in the generator**
+- *Decision:* Names come from frequency-weighted lists committed to the repo, sampled with a seeded NumPy generator.
+- *Alternatives:* Faker.
+- *Reason:* Faker's output can change between versions, which would break byte-for-byte reproducibility (section 3.5). Curated lists also control the mix of cultures needed for name edge cases.
+
+**D-015 · 2026-11-11 · Gender-ambiguous nicknames are derived, not flagged**
+- *Decision:* `nicknames.csv` records the gender of each canonical name. A variant is gender-ambiguous when it maps to canonical names of both genders (e.g. CHRIS → CHRISTOPHER and CHRISTINA).
+- *Alternatives:* A hand-maintained `gender_ambiguous` column.
+- *Reason:* A derived property cannot drift out of sync with the rows it describes.
+
+**D-016 · 2026-11-11 · Edge case catalog lives in `generator.yaml`**
+- *Decision:* Each edge case entry in `generator.yaml` holds its code, category, description, expected outcome, rate and the unit the rate applies to (`person`, `record`, `event` or `load`). `DATA_GENERATION.md` is rendered from it. A test checks that the codes match section 3.7 exactly.
+- *Alternatives:* Rates in YAML, descriptions in Markdown.
+- *Reason:* Section 3.7 requires the docs to be generated from the config. Keeping everything in one place makes drift impossible, and the test catches drift between the config and this spec.
+
+**D-017 · 2026-11-11 · Unspecified parameters given defaults**
+- *Decision:* 12 refresh loads per run (one simulated year); block size cap 1,000 records; newborn window 1 year; person IDs `P` + 9 digits.
+- *Alternatives:* —
+- *Reason:* The spec did not fix these values. All are configurable, and the README reports the values used.
+
+**D-018 · 2026-11-11 · dbt reads reference data as external text sources, not seeds**
+- *Decision:* dbt reads `config/reference/*.csv` with DuckDB `read_csv(..., all_varchar = true)` through a dbt-duckdb external source. Python reads the same files with the `csv` module, not pandas.
+- *Alternatives:* dbt seeds with `seed-paths` pointing at `config/reference/`; pandas `read_csv`.
+- *Reason:* Verified in phase 1: dbt's seed CSV parser turns the placeholder value `NULL` into a real null, and pandas does the same for `NA` and `NULL` by default. A placeholder list that silently loses entries is exactly the kind of drift the shared reference data exists to prevent. A smoke test asserts that dbt and the Python loader see identical rows.
+
+**D-019 · 2026-11-11 · pandas pinned to 2.3.3, not 3.x**
+- *Decision:* Pin `pandas==2.3.3`.
+- *Alternatives:* pandas 3.1.1 (latest).
+- *Reason:* PySpark 4.3.0 emits "PySpark does not yet fully support pandas >= 3.0.0" and recommends pandas < 3. `applyInPandas` is central to the shared clustering (D-006), so the supported version wins. The pytest config turns that warning into a failure, so an accidental upgrade is caught.
 
 ## 19. Publishing on GitHub
 
