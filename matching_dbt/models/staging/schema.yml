@@ -1,0 +1,43 @@
+version: 2
+
+models:
+  - name: stg_ref_name_variants
+    description: One row per (canonical, variant) name pair.
+    columns:
+      - name: canonical
+        data_tests: [not_null]
+      - name: variant
+        data_tests: [not_null]
+      - name: canonical_gender
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["M", "F", "U"]
+      - name: relation
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["nickname", "transliteration", "spelling"]
+
+  - name: stg_ref_placeholders
+    description: Placeholder values treated as missing during standardization.
+    columns:
+      - name: field
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ["name", "ssn", "dob"]
+      - name: value
+        data_tests: [not_null]
+
+  - name: stg_ref_particles
+    columns:
+      - name: particle
+        data_tests: [not_null, unique]
+
+  - name: stg_ref_suffixes
+    columns:
+      - name: form
+        data_tests: [not_null, unique]
+      - name: canonical
+        data_tests: [not_null]

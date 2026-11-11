@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  # Reference data shared with the PySpark implementation (DESIGN.md section 2).
+  # Read directly from config/reference/ as text, not as dbt seeds, so values
+  # such as "NA" and "NULL" are kept verbatim (D-018).
+  - name: reference
+    description: Reference tables in config/reference/, read by both implementations.
+    meta:
+      external_location: >-
+        read_csv('{{ env_var('PMP_REFERENCE_DIR', '../config/reference') }}/{name}.csv',
+        header = true, all_varchar = true)
+    tables:
+      - name: nicknames
+      - name: placeholders
+      - name: particles
+      - name: suffixes

@@ -1,0 +1,9 @@
+# Local DuckDB only; no cloud account needed. The CLI sets PMP_DUCKDB_PATH to an
+# absolute path under data/. The default works when dbt is run from this folder.
+person_matching:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('PMP_DUCKDB_PATH', '../data/warehouse/matching.duckdb') }}"
+      threads: 4
