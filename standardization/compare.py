@@ -96,11 +96,16 @@ def _is_leap_shift(a: date, b: date) -> bool:
     return False
 
 
+def _digits(d: date) -> str:
+    """YYYYMMDD with a zero-padded year (portable, unlike strftime on some platforms)."""
+    return f"{d.year:04d}{d.month:02d}{d.day:02d}"
+
+
 def dob_is_near(a: date, b: date) -> bool:
     """One of the four DOB near-miss patterns (for distinct dates)."""
     if a.year == b.year and (a.month, a.day) == (b.day, b.month):
         return True
-    if _hamming_one(a.strftime("%Y%m%d"), b.strftime("%Y%m%d")):
+    if _hamming_one(_digits(a), _digits(b)):
         return True
     if abs(a.year - b.year) == 1 and (a.month, a.day) == (b.month, b.day):
         return True

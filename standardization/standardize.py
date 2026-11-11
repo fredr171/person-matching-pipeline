@@ -90,12 +90,19 @@ TYPOGRAPHIC_APOSTROPHES = "’‘ʼ`´"
 _COMBINING_MARKS = re.compile("[̀-ͯ]")
 _NON_ASCII = re.compile("[^\u0000-\u007f]")
 _NOT_NAME_CHARACTER = re.compile(r"[^A-Z0-9' -]")
-_LOOSE_MARK = re.compile(r"(?<![A-Z0-9])['-]|['-](?![A-Z0-9])")
-_WHITESPACE = re.compile(r"\s+")
+# A hyphen or apostrophe survives only between two letters or digits. Written
+# as three lookaround-free steps so RE2 (DuckDB) and Java (Spark) agree (D-039):
+# runs of marks go, then marks after a non-alphanumeric, then marks before one.
+_MARK_RUN = re.compile(r"['-]{2,}")
+_MARK_AFTER_GAP = re.compile(r"(^|[^A-Z0-9])['-]")
+_MARK_BEFORE_GAP = re.compile(r"['-]($|[^A-Z0-9])")
+_SPACES = re.compile(r" +")
+# Whitespace trimmed from raw SSN, DOB and gender values (ASCII only, like SQL trim).
+RAW_WHITESPACE = " \t\r\n"
 
 
 def _collapse(text: str) -> str:
-    return _WHITESPACE.sub(" ", text).strip()
+    return _SPACES.sub(" ", text).strip(" ")
 
 
 def clean_name(value: str | None, letters: dict[str, str]) -> str | None:
@@ -109,7 +116,9 @@ def clean_name(value: str | None, letters: dict[str, str]) -> str | None:
         text = text.replace(mark, "'")
     text = _NON_ASCII.sub(" ", text).upper()
     text = _NOT_NAME_CHARACTER.sub(" ", text)
-    text = _LOOSE_MARK.sub(" ", text)
+    text = _MARK_RUN.sub(" ", text)
+    text = _MARK_AFTER_GAP.sub(r"\1 ", text)
+    text = _MARK_BEFORE_GAP.sub(r" \1", text)
     return _collapse(text) or None
 
 
@@ -165,10 +174,10 @@ def name_forms(text: str | None, tables: StandardizationTables) -> tuple[str, ..
 # SSN
 # --------------------------------------------------------------------------- #
 
-_SCIENTIFIC = re.compile(r"^(\d)(?:\.(\d+))?E\+?(\d+)$")
-_FLOAT_ZERO = re.compile(r"^(\d+)\.0+$")
-_DIGITS_ONLY = re.compile(r"^\d+$")
-_NON_DIGIT = re.compile(r"\D")
+_SCIENTIFIC = re.compile(r"^([0-9])(?:\.([0-9]+))?E\+?([0-9]+)$")
+_FLOAT_ZERO = re.compile(r"^([0-9]+)\.0+$")
+_DIGITS_ONLY = re.compile(r"^[0-9]+$")
+_NON_DIGIT = re.compile(r"[^0-9]")
 
 
 def _expand_scientific(text: str) -> str | None:
@@ -184,9 +193,9 @@ def _expand_scientific(text: str) -> str | None:
 
 def standardize_ssn(raw: str | None, placeholders: frozenset[str]) -> tuple[str | None, str | None]:
     """Return ``(ssn, null_reason)``; exactly one of the two is None."""
-    if raw is None or raw.strip() == "":
+    if raw is None or raw.strip(RAW_WHITESPACE) == "":
         return None, "MISSING"
-    text = raw.strip().upper()
+    text = raw.strip(RAW_WHITESPACE).upper()
     if _SCIENTIFIC.match(text):
         digits = _expand_scientific(text)
         if digits is None:
@@ -218,11 +227,11 @@ def standardize_ssn(raw: str | None, placeholders: frozenset[str]) -> tuple[str 
 # DOB
 # --------------------------------------------------------------------------- #
 
-_DOB_ISO = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$")
-_DOB_US = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
-_DOB_US_TWO_DIGIT = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2})$")
-_DOB_COMPACT = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
-_DOB_YEAR_ONLY = re.compile(r"^\d{4}$")
+_DOB_ISO = re.compile(r"^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:[ T].*)?$")
+_DOB_US = re.compile(r"^([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})$")
+_DOB_US_TWO_DIGIT = re.compile(r"^([0-9]{1,2})/([0-9]{1,2})/([0-9]{2})$")
+_DOB_COMPACT = re.compile(r"^([0-9]{4})([0-9]{2})([0-9]{2})$")
+_DOB_YEAR_ONLY = re.compile(r"^[0-9]{4}$")
 
 
 def _year_month_day(text: str) -> tuple[int, int, int] | None:
@@ -241,16 +250,16 @@ def standardize_dob(
     raw: str | None, placeholders: frozenset[str], today: date
 ) -> tuple[date | None, str | None]:
     """Return ``(dob, null_reason)``; exactly one of the two is None."""
-    if raw is None or raw.strip() == "":
+    if raw is None or raw.strip(RAW_WHITESPACE) == "":
         return None, "MISSING"
-    text = raw.strip()
+    text = raw.strip(RAW_WHITESPACE)
     if _DOB_YEAR_ONLY.match(text):
         return None, "YEAR_ONLY"
     parts = _year_month_day(text)
     if parts is None:
         return None, "UNPARSEABLE"
     try:
-        dob = date(*parts)
+        dob = date(*parts)  # year 0 is rejected here, and by a guard in SQL
     except ValueError:
         return None, "INVALID_DATE"
     if dob.isoformat() in placeholders:
@@ -269,7 +278,7 @@ def standardize_gender(raw: str | None, genders: dict[str, str]) -> str | None:
     """M, F or X through ``genders.csv``; any other value is null."""
     if raw is None:
         return None
-    return genders.get(raw.strip().upper())
+    return genders.get(raw.strip(RAW_WHITESPACE).upper())
 
 
 # --------------------------------------------------------------------------- #
