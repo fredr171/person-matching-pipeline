@@ -16,7 +16,6 @@ from metaphone import doublemetaphone
 
 from generator import catalog
 from generator.docs import DOC_PATH, render_markdown
-from generator.generate import generate
 from generator.names import DATA_DIR, NamePools
 from generator.population import build_population
 from generator.record_cases import (
@@ -29,34 +28,6 @@ from generator.simulate import plan_refresh_ops
 from generator.timeline import schedule_life_events
 from generator.writer import EVENT_SCHEMA, TRUTH_SCHEMA
 from pipeline import paths
-
-# --------------------------------------------------------------------------- #
-# Fixtures: one normal and one boosted small run per test session
-# --------------------------------------------------------------------------- #
-
-
-@pytest.fixture(scope="session")
-def small_run(tmp_path_factory, generator_config):
-    data_dir = tmp_path_factory.mktemp("small")
-    summary = generate(generator_config, "small", data_dir=data_dir)
-    return data_dir, summary
-
-
-@pytest.fixture(scope="session")
-def boosted_run(tmp_path_factory, generator_config):
-    data_dir = tmp_path_factory.mktemp("boosted")
-    generate(boosted(generator_config), "small", data_dir=data_dir)
-    return data_dir
-
-
-@pytest.fixture(scope="session")
-def boosted_events(boosted_run):
-    return read_loads(boosted_run, "loads", "events.parquet")
-
-
-@pytest.fixture(scope="session")
-def boosted_truth(boosted_run):
-    return read_loads(boosted_run, "truth", "truth.parquet")
 
 
 def _latest_truth(truth: dict[int, list[dict]]) -> dict[tuple[str, str], dict]:

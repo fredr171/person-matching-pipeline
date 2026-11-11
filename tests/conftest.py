@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from generator_helpers import boosted, read_loads
 
+from generator.generate import generate
 from pipeline import config, paths, reference
 
 
@@ -25,3 +27,32 @@ def reference_data() -> reference.ReferenceData:
 @pytest.fixture(scope="session")
 def design_doc() -> str:
     return (paths.REPO_ROOT / "docs" / "DESIGN.md").read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# Fixtures: one normal and one boosted small run per test session
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(scope="session")
+def small_run(tmp_path_factory, generator_config):
+    data_dir = tmp_path_factory.mktemp("small")
+    summary = generate(generator_config, "small", data_dir=data_dir)
+    return data_dir, summary
+
+
+@pytest.fixture(scope="session")
+def boosted_run(tmp_path_factory, generator_config):
+    data_dir = tmp_path_factory.mktemp("boosted")
+    generate(boosted(generator_config), "small", data_dir=data_dir)
+    return data_dir
+
+
+@pytest.fixture(scope="session")
+def boosted_events(boosted_run):
+    return read_loads(boosted_run, "loads", "events.parquet")
+
+
+@pytest.fixture(scope="session")
+def boosted_truth(boosted_run):
+    return read_loads(boosted_run, "truth", "truth.parquet")
