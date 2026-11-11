@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 from generator_helpers import boosted, read_loads
 
 from generator.generate import generate
+from ingestion.run import ingest_all
 from pipeline import config, paths, reference
 
 
@@ -56,3 +59,12 @@ def boosted_events(boosted_run):
 @pytest.fixture(scope="session")
 def boosted_truth(boosted_run):
     return read_loads(boosted_run, "truth", "truth.parquet")
+
+
+@pytest.fixture(scope="session")
+def ingested_boosted(boosted_run, tmp_path_factory):
+    """A private copy of the boosted run, ingested once."""
+    data_dir = tmp_path_factory.mktemp("ingest") / "data"
+    shutil.copytree(boosted_run / "loads", data_dir / "loads")
+    metrics = ingest_all(data_dir)
+    return data_dir, metrics

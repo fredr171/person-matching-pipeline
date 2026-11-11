@@ -254,15 +254,6 @@ def test_reapplying_a_load_is_a_no_op():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.fixture(scope="module")
-def ingested_boosted(boosted_run, tmp_path_factory):
-    """A private copy of the boosted run, ingested once."""
-    data_dir = tmp_path_factory.mktemp("ingest") / "data"
-    shutil.copytree(boosted_run / "loads", data_dir / "loads")
-    metrics = ingest_all(data_dir)
-    return data_dir, metrics
-
-
 def _ingested_hashes(data_dir):
     return file_hashes(data_dir / "ingested")
 
