@@ -4,10 +4,39 @@ config-version: 2
 profile: person_matching
 
 model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages"]
+
+# Every value here is supplied by `python -m pipeline match-dbt` from
+# config/matching.yaml and the load being matched (pipeline/match_dbt.py).
+# The defaults only exist so `dbt parse` works on its own.
+vars:
+  load_id: 0
+  load_date: "2025-01-01"
+  current_records_path: ""
+  previous_output_dir: ""
+  profile: conservative
+  strong_name_threshold: 0.95
+  weak_name_threshold: 0.88
+  tier_4_matches: false
+  prefix_min_length: 6
+  generational_gap_years: 12
+  newborn_max_age_years: 1
+  max_block_size: 1000
+  blocking_keys: ["ssn", "dob", "ssn_sorted_digits_birth_year", "ssn_first5_birth_year", "last_phonetic_first_initial_birth_year"]
+  person_id_prefix: P
+  person_id_digits: 9
+  output_dir: "../data/matched/dbt/default"
 
 models:
   person_matching:
     staging:
       +materialized: view
+    intermediate:
+      +materialized: table
+    matching:
+      +materialized: table
+    outputs:
+      +materialized: table

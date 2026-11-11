@@ -23,7 +23,6 @@ EXIT_NOT_IMPLEMENTED = 2
 
 # Command -> build phase that implements it.
 _PLANNED_COMMANDS: dict[str, tuple[int, str]] = {
-    "match-dbt": (5, "Run matching with dbt on DuckDB"),
     "evaluate": (6, "Score results against ground truth"),
     "match-spark": (7, "Run matching with PySpark"),
 }
@@ -55,9 +54,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--through-load", type=int, default=None, help="Stop after this load (default: all)"
     )
 
+    match_dbt = sub.add_parser("match-dbt", help="Run matching with dbt on DuckDB")
+    match_dbt.add_argument(
+        "--profile", default=None, help="conservative | balanced | aggressive (default: config)"
+    )
+    match_dbt.add_argument(
+        "--data-dir", type=Path, default=paths.DEFAULT_DATA_DIR, help="Data directory"
+    )
+    match_dbt.add_argument(
+        "--through-load", type=int, default=None, help="Stop after this load (default: all)"
+    )
+
     for name, (phase, help_text) in _PLANNED_COMMANDS.items():
         command = sub.add_parser(name, help=f"{help_text} (phase {phase})")
-        if name in {"match-dbt", "match-spark", "evaluate"}:
+        if name in {"match-spark", "evaluate"}:
             command.add_argument(
                 "--profile", default=None, help="conservative | balanced | aggressive"
             )
@@ -118,6 +128,26 @@ def _ingest(data_dir: Path, through_load: int | None) -> int:
     return EXIT_OK
 
 
+def _match_dbt(profile: str | None, data_dir: Path, through_load: int | None) -> int:
+    from pipeline.match_dbt import match_all
+
+    started = time.perf_counter()
+    count = 0
+    for run in match_all(data_dir, profile, through_load):
+        m = run.metrics
+        count += 1
+        print(
+            f"load {run.load_id:>2}: {m.get(('records', 'live_records'), 0):>9,} records, "
+            f"{m.get(('pairs', 'compared'), 0):>9,} pairs, "
+            f"{m.get(('pairs', 'matched'), 0):>8,} matches, "
+            f"{m.get(('clustering', 'clusters'), 0):>9,} clusters, "
+            f"{m.get(('person_ids', 'records_with_changed_id'), 0):>6,} id changes "
+            f"({run.seconds:.1f}s)"
+        )
+    print(f"Matched {count} loads with dbt in {time.perf_counter() - started:.1f}s")
+    return EXIT_OK
+
+
 def _docs() -> int:
     from generator.docs import write_docs
 
@@ -134,6 +164,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _docs()
     if args.command == "ingest":
         return _ingest(args.data_dir, args.through_load)
+    if args.command == "match-dbt":
+        return _match_dbt(args.profile, args.data_dir, args.through_load)
 
     if args.command == "check-config":
         try:

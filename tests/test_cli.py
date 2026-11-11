@@ -18,7 +18,6 @@ def test_check_config_succeeds(capsys):
 @pytest.mark.parametrize(
     ("argv", "phase"),
     [
-        (["match-dbt"], 5),
         (["evaluate"], 6),
         (["match-spark", "--profile", "balanced"], 7),
     ],

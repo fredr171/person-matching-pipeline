@@ -7,3 +7,6 @@ person_matching:
       type: duckdb
       path: "{{ env_var('PMP_DUCKDB_PATH', '../data/warehouse/matching.duckdb') }}"
       threads: 4
+      # Registers the shared Jaro-Winkler and Double Metaphone UDFs (D-009).
+      plugins:
+        - module: standardization.duckdb_udfs

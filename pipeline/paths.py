@@ -40,6 +40,21 @@ def ingested_dir(load_id: int, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
     return data_dir / "ingested" / f"load_{load_id:04d}"
 
 
+def matched_dir(engine: str, profile: str, load_id: int, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
+    """Matching outputs for one engine, profile and load.
+
+    For example ``data/matched/dbt/conservative/load_0003/``.
+    """
+    if load_id < 0:
+        raise ValueError(f"load_id must be non-negative, got {load_id}")
+    return data_dir / "matched" / engine / profile / f"load_{load_id:04d}"
+
+
+def warehouse_path(engine: str, profile: str, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
+    """The DuckDB file dbt builds into for one profile."""
+    return data_dir / "warehouse" / f"{engine}_{profile}.duckdb"
+
+
 def truth_dir(load_id: int, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
     """Directory holding one load's ground truth: ``data/truth/load_NNNN/``.
 

@@ -1,0 +1,64 @@
+version: 2
+
+models:
+  - name: match_pairs
+    description: Every compared pair with field levels, tier, blockers, decision and reason code.
+    data_tests:
+      - unique_ordered_pair
+    columns:
+      - name: reason_code
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - TIER_1_EXACT_IDS
+                  - TIER_2_SSN_NEAR
+                  - TIER_3_DOB_NEAR
+                  - TIER_4_NO_SSN
+                  - NO_MATCH_INSUFFICIENT
+                  - BLOCKED_GENERATIONAL
+                  - BLOCKED_SUFFIX
+                  - BLOCKED_TWINS
+                  - BLOCKED_SSN_CONFLICT
+
+  - name: clustering_results
+    description: Output of the shared clustering function (clusters and skipped joins).
+
+  - name: clusters
+    columns:
+      - name: record_key
+        data_tests: [not_null, unique]
+      - name: cluster_id
+        data_tests: [not_null]
+
+  - name: id_reconciliation
+    description: Output of the shared ID reconciliation function.
+    config:
+      person_id_prefix: "{{ var('person_id_prefix') }}"
+      person_id_digits: "{{ var('person_id_digits') }}"
+
+  - name: person_assignment
+    description: Source record -> stable person id for this load.
+    columns:
+      - name: record_uid
+        data_tests: [not_null, unique]
+      - name: record_key
+        data_tests: [not_null, unique]
+      - name: person_id
+        data_tests: [not_null]
+
+  - name: person_id_crosswalk
+    columns:
+      - name: retired_id
+        data_tests: [not_null, unique]
+      - name: reason
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [MERGED, ALL_DELETED]
+
+  - name: id_state
+    columns:
+      - name: next_sequence
+        data_tests: [not_null]

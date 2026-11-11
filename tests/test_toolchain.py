@@ -39,7 +39,7 @@ def _dbt(*args: str) -> None:
 
 
 def test_dbt_reads_reference_data_identically(dbt_env, reference_data):
-    _dbt("build", "--select", "staging")
+    _dbt("build", "--select", "stg_ref_*")
 
     # Same connection config as dbt-duckdb, which keeps its in-process connection open.
     with duckdb.connect(str(dbt_env)) as con:
