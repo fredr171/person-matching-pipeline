@@ -42,11 +42,11 @@ person-matching-pipeline/
 ├── config/
 │   ├── generator.yaml         # presets, edge case rates, seed
 │   ├── matching.yaml          # profiles, thresholds, blocker settings
-│   └── reference/             # nicknames.csv, placeholders.csv, particles.csv, suffixes.csv
+│   └── reference/             # nicknames, placeholders, particles, suffixes, letters, genders (.csv)
 ├── pipeline/                  # shared plumbing: config + reference loaders, paths, CLI
 ├── generator/                 # synthetic data + CDC event generator; name lists in generator/data/
 ├── ingestion/                 # CDC -> current-state table
-├── standardization/           # Python reference implementation + shared similarity functions
+├── standardization/           # Python reference implementation (sections 5, 7-9) + similarity functions
 ├── matching_dbt/              # dbt project (DuckDB); seeds read from config/reference/
 ├── matching_spark/            # PySpark implementation
 ├── clustering/                # shared constrained clustering + ID reconciliation
@@ -232,16 +232,18 @@ Shared Python module, run before either matching implementation. For each load i
 
 ## 5. Standardization
 
-Applied identically in both implementations. Raw values are kept alongside cleaned values.
+Applied identically in both implementations. Raw values are kept alongside cleaned values. The Python reference implementation in `standardization/` defines the expected behavior of sections 5 and 7–9, and both engines are tested against it (D-037).
 
-- Unicode NFC normalization, then strip accents; uppercase; trim and collapse whitespace; remove punctuation except hyphens and apostrophes inside names (then compare with and without them).
+- Unicode NFC normalization, then strip accents through `config/reference/letters.csv` (D-029); uppercase; trim and collapse whitespace; remove punctuation except hyphens and apostrophes inside names (then compare with and without them).
 - Extract suffixes (JR, SR, II, III, IV, in all common formats) from last and first names into `suffix`.
 - Strip name particles (DE, DE LA, DEL, VAN, VAN DER, VON, AL, EL, DA, DI, LE, LA, O') into a particle-free comparison form; keep the original too.
 - Tokenize names; keep a space-removed form.
 - SSN: keep digits only; if numeric artifacts are detected, recover (drop `.0`, expand scientific notation where lossless), left-pad to 9. Null out placeholders, invalid areas (000, 666), group 00, serial 0000, and anything starting with 9.
 - DOB: parse common formats; null out placeholders, future dates, year-only values; flag Jan 1 as weak.
 - Placeholder names (from `config/reference/placeholders.csv`) become null.
-- Gender normalized to M, F, X, or null.
+- Gender normalized to M, F, X, or null through `config/reference/genders.csv`.
+
+Details the bullets above leave open (comparison forms, which SSNs are padded, accepted DOB formats, null reason codes) are fixed in D-030 and D-038.
 
 ## 6. Blocking
 
@@ -263,12 +265,12 @@ Blocks larger than a configured cap are skipped and reported in metrics (a spike
 
 **DOB:** `EXACT`, `NEAR` (month/day swap, one-digit typo, year ±1 with same month/day, leap-day shift), `MISSING`, `DIFFERENT`. Also computed: absolute gap in years.
 
-**Names** (first and last separately, best result across all forms and tokens):
+**Names** (first and last separately, best result across all forms and tokens; forms in D-030):
 
 | Level | Rule |
 |---|---|
-| STRONG | Exact, nickname/variant table, phonetic (Double Metaphone), Jaro-Winkler ≥ strong threshold, or prefix match where the shorter name is ≥ 6 chars |
-| WEAK | Jaro-Winkler between weak and strong thresholds, or initial only |
+| STRONG | Exact, nickname/variant table (names in the same group, D-031), phonetic (Double Metaphone), Jaro-Winkler ≥ strong threshold, or prefix match where the shorter name is ≥ 6 chars |
+| WEAK | Jaro-Winkler between weak and strong thresholds, or initial only (a single letter is never STRONG) |
 | NONE | Anything else, or missing |
 
 A first/last swap is detected separately: if first↔last cross-comparisons are both STRONG, both names are treated as STRONG with flag `SWAPPED`.
@@ -289,6 +291,8 @@ Principle: **one imperfect field per auto-match.** Uncertain cases are no-match.
 | 4 | MISSING | EXACT | Both STRONG | Per profile (no-match in conservative) | `TIER_4_NO_SSN` |
 | — | Anything else | | | No match | `NO_MATCH_INSUFFICIENT` |
 
+A January 1 DOB (DOB_JAN_FIRST) is weak: it counts as EXACT in Tier 1, where the SSN is also exact, but not in Tiers 2 and 4 (D-032). Tier 4 keeps its reason code when the profile does not allow it to match (D-033).
+
 Tier 1 deliberately requires only one strong name: exact SSN and exact DOB together are strong enough to survive marriage, divorce, adoption, and legal first-name changes. Twins (different SSNs) and parent/child cases (different DOBs) cannot reach Tier 1.
 
 ## 9. Blockers (cannot-link rules)
@@ -299,7 +303,7 @@ Evaluated on every candidate pair. A blocker overrides any tier and creates a **
 |---|---|---|
 | Generational | SSN EXACT or NEAR, DOB gap ≥ 12 years | `BLOCKED_GENERATIONAL` |
 | Suffix conflict | Both suffixes non-null and different | `BLOCKED_SUFFIX` |
-| Twins/multiples | DOB EXACT, last STRONG, first NONE (not a nickname), SSN EXACT or NEAR or both non-null and differing | `BLOCKED_TWINS` |
+| Twins/multiples | DOB EXACT, last STRONG, first NONE with both first names present (D-035), SSN NEAR or both non-null and differing, not EXACT (D-036) | `BLOCKED_TWINS` |
 | SSN conflict | SSN EXACT, DOB DIFFERENT, both names NONE | `BLOCKED_SSN_CONFLICT` |
 | Newborn on SSN | One record has a placeholder name and DOB within the last year, other record's DOB ≥ 12 years older | `BLOCKED_GENERATIONAL` |
 
@@ -532,6 +536,61 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Decision:* Validation rejects broken *structure*, never bad *values*: placeholder SSNs, impossible DOBs and odd formats pass to standardization. Column shift needs a DOB containing letters plus a corroborating sign (empty first name, date-like SSN, or identifier-like gender). Mojibake (a UTF-8 lead byte followed by a continuation byte, decoded as Latin-1) and control or replacement characters are rejected as `REJECT_ENCODING`, resolving "rejected or flagged" in section 3.7 to rejected.
 - *Alternatives:* Reject any unparseable DOB as corruption; repair mojibake by re-decoding.
 - *Reason:* A single bad DOB is a data quality case the catalog expects matching to handle (DOB_PLACEHOLDER, DOB_YEAR_ONLY), so it must not be confused with a shift. Repairing mojibake is guesswork and would hide the case; the next clean update for the key is accepted (D-027). A test checks rejects against ground truth in both directions: nothing clean is rejected and no corrupted record is missed.
+
+**D-029 · 2026-11-11 · Accent stripping and gender codes are table-driven**
+- *Decision:* `config/reference/letters.csv` maps every accented or special Latin letter (U+00C0–U+017F, plus Ø, Æ, Œ, ß, Ł and others with no Unicode decomposition) to ASCII. Standardization maps through it and then drops any remaining combining marks. `config/reference/genders.csv` maps raw gender values to M, F or X; anything unlisted is null.
+- *Alternatives:* `unicodedata` in Python and `strip_accents` in DuckDB; hard-coded gender codes.
+- *Reason:* Spark has no accent-stripping or NFC function, and letters such as Ø have no Unicode decomposition. A shared table gives all three engines the same result, and mapping before dropping combining marks equals NFC-then-strip, so engines without NFC agree. A test checks the table against Unicode decomposition.
+
+**D-030 · 2026-11-11 · Name comparison forms**
+- *Decision:* Each cleaned name yields these forms: the name; without apostrophes and with hyphens as spaces; that with spaces removed; the same three with one leading particle stripped (longest particle first, O' attached); and, for multi-token names, each token of two or more letters that is not a particle word. Name levels are the best result over all pairs of forms. Particles are stripped from either name field, because family-name-first sources put the surname in the first-name field.
+- *Alternatives:* Separate rules per edge case (token rule, particle rule, ...).
+- *Reason:* One cross-product of forms covers NAME_MIDDLE_IN_FIRST, NAME_CONCATENATED, NAME_COMPOUND_SURNAME and NAME_PARTICLE with a single rule that SQL can express as an exploded join. "Delacruz" vs "Cruz" has no form in common. Both match "De la Cruz", so clustering can still join them through it.
+
+**D-031 · 2026-11-11 · Variant matches use name groups**
+- *Decision:* Two names are related when they share a canonical name in `nicknames.csv`: one is a variant of the other, or both are variants of the same canonical (BOB and ROB, MOHAMED and MUHAMMED).
+- *Alternatives:* Only direct canonical–variant pairs.
+- *Reason:* Two records of one person can each carry a different variant, and transliterations are listed as variants of one canonical spelling, so direct pairs alone would miss MOHAMED vs MOHAMMED.
+
+**D-032 · 2026-11-11 · A January 1 DOB cannot carry Tier 2 or Tier 4** (decided by the project owner)
+- *Decision:* `dob_is_jan1` is set on every January 1 DOB. Such a DOB still compares as EXACT and counts in Tier 1 (SSN also exact) and Tier 3, but it cannot be the exact DOB that Tier 2 and Tier 4 rely on.
+- *Alternatives:* An informational flag only; comparing two January 1 DOBs as NEAR everywhere.
+- *Reason:* Section 3.7 says "kept, flagged weak". Where the DOB is the main evidence (SSN near or missing), a default date is not good enough. Where the SSN is exact, it is.
+
+**D-033 · 2026-11-11 · Tier 4 keeps its reason code when the profile blocks it**
+- *Decision:* A pair meeting Tier 4 gets `TIER_4_NO_SSN` in every profile, with `is_match` true only when `tier_4_matches` is set.
+- *Alternatives:* `NO_MATCH_INSUFFICIENT` when the profile disallows Tier 4.
+- *Reason:* Evaluation and the README need to count how many pairs the conservative profile gives up at Tier 4 (COMMON_NAME_SAME_DOB: "Tier 4 no-match").
+
+**D-034 · 2026-11-11 · Phonetic twins are kept as designed and measured first** (decided by the project owner)
+- *Decision:* Twins whose first names match phonetically, by token or by nickname (GIULIA/CHLOE share Double Metaphone KL; JOHN/JANE share JN) and whose SSNs are near reach Tier 2. A scenario test pins this behavior. In the medium run 47 of about 4,800 twin pairs are affected. The rule is revisited in phase 6 with evaluation numbers.
+- *Alternatives:* Stricter name evidence in Tier 2; a broader twins blocker.
+- *Reason:* Changing a matching rule should be driven by measured precision and recall per edge case, which phase 6 provides.
+
+**D-035 · 2026-11-11 · The twins blocker needs both first names** (decided by the project owner)
+- *Decision:* `BLOCKED_TWINS` fires only when both records have a first name. A placeholder name such as BABY GIRL is missing, not different.
+- *Alternatives:* Read "first NONE" literally, with NONE including missing (section 7).
+- *Reason:* Otherwise a newborn's placeholder record gets a cannot-link to its own later named record, contradicting NEWBORN_PLACEHOLDER.
+
+**D-036 · 2026-11-11 · The twins blocker does not fire on an exact SSN** (decided by the project owner)
+- *Decision:* `BLOCKED_TWINS` requires SSN NEAR or two different non-null SSNs. Same SSN, DOB and last name with a different first name is Tier 1.
+- *Alternatives:* Section 9 as first written, which included SSN EXACT.
+- *Reason:* With SSN EXACT included, a legal first-name change is blocked, contradicting LEGAL_FIRST_NAME_CHANGE ("Tier 1"). In the medium run the original rule cannot-linked 882 of 53,171 same-person pairs sharing SSN and DOB (mostly two different first-name distortions on two records), against 10 pairs of different people sharing all three values.
+
+**D-037 · 2026-11-11 · The Python reference covers standardization through blockers** (decided by the project owner)
+- *Decision:* Build phase 4 implements sections 5 and 7–9 in Python (`standardization/standardize.py`, `compare.py`, `rules.py`) with unit tests and one scenario test per catalog code. Blocking, clustering and ID reconciliation stay in phase 5.
+- *Alternatives:* Standardization only in phase 4.
+- *Reason:* One oracle lets the dbt and PySpark implementations be tested against the same expected decisions, and the scenario tests are written once.
+
+**D-038 · 2026-11-11 · Standardization details section 5 leaves open**
+- *Decision:*
+  - *Names:* any non-ASCII character left after the letter map is removed. A hyphen or apostrophe that is not between two letters or digits becomes a space. A suffix is taken only as the trailing token, and only when another token remains, from the last name first, then the first name.
+  - *SSNs:* only purely numeric values (including `.0` and scientific forms) are left-padded to 9 digits. Formatted values must have exactly 9 digits. Scientific notation is expanded only when every digit is present.
+  - *DOBs:* accepted formats are ISO (optionally with a time), `MM/DD/YYYY`, `MM/DD/YY` (read as 20YY, then nulled if in the future) and `YYYYMMDD`. Day-first formats are not accepted, because they are ambiguous with US dates.
+  - *Null reasons:* every nulled SSN or DOB records why: `MISSING`, `PLACEHOLDER`, `ITIN_OR_TEMPORARY`, `INVALID_AREA`, `INVALID_GROUP`, `INVALID_SERIAL`, `INVALID_LENGTH`, `UNPARSEABLE`, `UNRECOVERABLE`, `YEAR_ONLY`, `INVALID_DATE`, `FUTURE`.
+  - *DOB gap:* whole years computed age-style.
+- *Alternatives:* Padding every short SSN; a century pivot for two-digit years.
+- *Reason:* Padding a formatted SSN that lost a digit would invent a wrong but valid-looking number. The 20YY reading is what section 3.7 describes for DOB_TWO_DIGIT_YEAR. Null reasons make placeholder spikes and source problems visible in metrics.
 
 ## 19. Publishing on GitHub
 

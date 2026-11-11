@@ -2,8 +2,10 @@
 
 <!-- CI badge goes here once the GitHub repository exists. -->
 
-> **Status: under construction.** Build phases 1–3 of 8 are complete: repository skeleton,
-> configuration, reference data, the synthetic data generator, and CDC ingestion. Results and the full quickstart arrive in later phases;
+> **Status: under construction.** Build phases 1–4 of 8 are complete: repository skeleton,
+> configuration, reference data, the synthetic data generator, CDC ingestion, and the Python
+> reference implementation of standardization, comparison, match tiers and blockers
+> ([matching rules](docs/MATCHING_RULES.md)). Results and the full quickstart arrive in later phases;
 > see [build phases](docs/DESIGN.md#17-build-phases).
 
 **The problem.** The same person shows up in many source systems under slightly
