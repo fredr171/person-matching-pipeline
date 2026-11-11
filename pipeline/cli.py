@@ -23,7 +23,6 @@ EXIT_NOT_IMPLEMENTED = 2
 
 # Command -> build phase that implements it.
 _PLANNED_COMMANDS: dict[str, tuple[int, str]] = {
-    "ingest": (3, "Apply CDC events to the current-state table"),
     "match-dbt": (5, "Run matching with dbt on DuckDB"),
     "evaluate": (6, "Score results against ground truth"),
     "match-spark": (7, "Run matching with PySpark"),
@@ -47,6 +46,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("docs", help="Regenerate docs/DATA_GENERATION.md from the config")
+
+    ingest = sub.add_parser("ingest", help="Apply CDC events to the current-state table")
+    ingest.add_argument(
+        "--data-dir", type=Path, default=paths.DEFAULT_DATA_DIR, help="Data directory"
+    )
+    ingest.add_argument(
+        "--through-load", type=int, default=None, help="Stop after this load (default: all)"
+    )
 
     for name, (phase, help_text) in _PLANNED_COMMANDS.items():
         command = sub.add_parser(name, help=f"{help_text} (phase {phase})")
@@ -94,6 +101,22 @@ def _generate(preset: str | None, seed: int | None, data_dir: Path) -> int:
     return EXIT_OK
 
 
+def _ingest(data_dir: Path, through_load: int | None) -> int:
+    from ingestion.run import ingest_all
+
+    started = time.perf_counter()
+    results = ingest_all(data_dir, through_load)
+    for m in results:
+        rejected = sum(m.rejected.values())
+        print(
+            f"load {m.load_id:>2}: {m.events_read:>8,} events, {rejected:>5,} rejected, "
+            f"{m.duplicates_dropped:>5,} duplicates, {m.stale_ignored:>6,} stale, "
+            f"{m.live_records:>9,} live records"
+        )
+    print(f"Ingested {len(results)} loads in {time.perf_counter() - started:.1f}s")
+    return EXIT_OK
+
+
 def _docs() -> int:
     from generator.docs import write_docs
 
@@ -108,6 +131,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _generate(args.preset, args.seed, args.data_dir)
     if args.command == "docs":
         return _docs()
+    if args.command == "ingest":
+        return _ingest(args.data_dir, args.through_load)
 
     if args.command == "check-config":
         try:

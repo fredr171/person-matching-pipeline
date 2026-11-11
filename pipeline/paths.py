@@ -33,6 +33,13 @@ def load_dir(load_id: int, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
     return data_dir / "loads" / f"load_{load_id:04d}"
 
 
+def ingested_dir(load_id: int, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
+    """Directory holding ingestion output after one load: ``data/ingested/load_NNNN/``."""
+    if load_id < 0:
+        raise ValueError(f"load_id must be non-negative, got {load_id}")
+    return data_dir / "ingested" / f"load_{load_id:04d}"
+
+
 def truth_dir(load_id: int, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
     """Directory holding one load's ground truth: ``data/truth/load_NNNN/``.
 
