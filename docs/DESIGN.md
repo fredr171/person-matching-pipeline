@@ -257,7 +257,7 @@ Candidate pairs are generated from records sharing any of these keys (skipping n
 | ssn first 5 + dob year | Substitutions in last 4 |
 | phonetic(last) + first initial + birth year | Name-led matches with DOB errors |
 
-Blocks larger than a configured cap are skipped and reported in metrics (a spike usually means a new placeholder value). Pairs are deduplicated across keys.
+Blocks larger than a configured cap are skipped and reported in metrics (a spike usually means a new placeholder value). Pairs are deduplicated across keys. Exact key values are fixed in D-040.
 
 ## 7. Field comparison levels
 
@@ -315,6 +315,8 @@ Pairwise matches are not transitive by default. Clustering is constrained and de
 2. Within each component, sort match edges by tier ascending, then by `(min record key, max record key)` for a stable order.
 3. Greedy union-find: join two clusters only if no cannot-link pair exists between any member of one and any member of the other. Skipped joins are recorded with `SKIPPED_TRANSITIVITY`.
 
+A record key is `SOURCE|ID`, and a cluster id is the smallest record key in the cluster (D-041). Each skipped join records the cannot-link pair that stopped it.
+
 Implementation: standardization, blocking, comparison, tiers, and blockers are SQL in dbt and DataFrame operations in PySpark. The constrained clustering step is sequential by nature, so both implementations call the **same shared Python function** in `clustering/`: a dbt Python model on DuckDB, and `groupBy(component).applyInPandas` in PySpark. This is a deliberate, documented decision: identical logic beats forcing a greedy algorithm into SQL.
 
 The same reasoning applies to the two string-similarity primitives that the engines do not both provide natively: Jaro-Winkler (DuckDB has it, Spark does not) and Double Metaphone (neither has it). Both are implemented once in `standardization/similarity.py` and registered as a DuckDB UDF for dbt and as a pandas UDF in PySpark. Everything else stays in SQL / DataFrame operations (D-009).
@@ -332,6 +334,8 @@ Matching recomputes everything each load. IDs are then reconciled against the pr
 | All of a previous ID's records deleted | ID retired with no successor |
 
 Ties go to the oldest ID. Retired IDs are never revived. IDs are assigned from a monotonic sequence with a fixed prefix (e.g. `P000000123`).
+
+Records are identified by `SOURCE|ID|LIFE`, so a reused source ID is a new record. When a split leaves equal parts, the part in the cluster with the smallest cluster id keeps the ID. New IDs are issued in cluster id order (D-041).
 
 Outputs:
 - `person_assignment` (source record → person_id, load_id)
@@ -353,6 +357,8 @@ Generational gap (12 years) and block size cap are also in `config/matching.yaml
 - `clusters`, `person_assignment`, `person_id_crosswalk`.
 - `rejects` from ingestion.
 - `run_metrics`: counts by reason code, skipped blocks, cluster size distribution.
+
+Each engine writes one Parquet file per table to `data/matched/<engine>/<profile>/load_NNNN/`. Besides the tables above this includes `records_standardized`, `skipped_joins`, `skipped_blocks`, and `id_state`, which holds the next ID sequence number for the following load (D-042).
 
 Users must be able to pull edge cases with simple queries, e.g. all `BLOCKED_TWINS` pairs, all `SKIPPED_TRANSITIVITY` joins, all ID merges this load. Provide example queries in the README.
 
@@ -591,6 +597,26 @@ Record each significant decision with date, decision, alternatives considered, a
   - *DOB gap:* whole years computed age-style.
 - *Alternatives:* Padding every short SSN; a century pivot for two-digit years.
 - *Reason:* Padding a formatted SSN that lost a digit would invent a wrong but valid-looking number. The 20YY reading is what section 3.7 describes for DOB_TWO_DIGIT_YEAR. Null reasons make placeholder spikes and source problems visible in metrics.
+
+**D-039 · 2026-11-11 · Portable standardization regexes**
+- *Decision:* The Python reference uses only regex features that RE2 (DuckDB) and Java (Spark) handle the same way. Hyphen and apostrophe cleanup is three lookaround-free steps: runs of marks, then a mark after a non-alphanumeric character, then a mark before one. Digits are matched with `[0-9]`, not `\d`, which is Unicode-aware in Python. Raw values are trimmed of ASCII whitespace only. Dates are formatted by hand, not with `strftime`.
+- *Alternatives:* Lookbehind in Python with a different expression per engine.
+- *Reason:* One expression that reads the same in all three engines makes parity a property of the rules, not of careful translation. RE2 has no lookbehind.
+
+**D-040 · 2026-11-11 · Blocking key values**
+- *Decision:* `ssn` is the 9-digit SSN. `dob` is `YYYY-MM-DD`. `ssn_sorted_digits_birth_year` is the SSN's digits sorted ascending, `|`, birth year. `ssn_first5_birth_year` is the first 5 digits, `|`, birth year. `last_phonetic_first_initial_birth_year` is the primary Double Metaphone code of the last name with spaces, hyphens and apostrophes removed, `|`, the first letter of the first name, `|`, birth year. A key needs every field it uses. The cap applies per key value; a candidate pair lists every key that produced it.
+- *Alternatives:* Phonetic codes per last-name token; secondary metaphone codes.
+- *Reason:* Removing separators makes O'BRIEN, OBRIEN and VAN DER BERG / VANDERBERG share a block. Using one code per record keeps blocks small; the other blocking keys cover the rest.
+
+**D-041 · 2026-11-11 · Record and cluster identity**
+- *Decision:* A record key is `SOURCE|ID`; ID reconciliation uses the record uid `SOURCE|ID|LIFE`, so a record re-created after deletion, or a reused source ID, does not inherit the old record's person ID. A cluster id is the smallest record key in the cluster. When an ID's records split evenly, the cluster with the smallest cluster id keeps it. New IDs are issued in cluster id order.
+- *Alternatives:* Matching the re-created record back to its old ID through the old record (impossible: the old one is gone); random or hash cluster ids.
+- *Reason:* SOURCE_ID_REUSE is a different person under the same source ID, so a source ID alone is not an identity. If it is the same person, matching puts the new life in the same cluster as their other records and it gets their ID anyway. Ordering by record key makes every tie deterministic in both engines.
+
+**D-042 · 2026-11-11 · dbt implementation layout**
+- *Decision:* Each load is one `dbt build`. `python -m pipeline match-dbt` passes the load's inputs, its manifest date, and every profile parameter from `config/matching.yaml` as dbt vars. Each profile has its own DuckDB file under `data/warehouse/`. The clustering and reconciliation Python models each return one long table with a `row_type` column, which SQL models split into the output tables. Outputs are written with an explicit `COPY` post-hook, sorted, to `data/matched/dbt/<profile>/load_NNNN/`. The next load reads the previous load's `person_assignment` and `id_state` from there.
+- *Alternatives:* dbt-duckdb's `external` materialization, which writes a row of nulls for an empty table; incremental models holding ID history inside the warehouse.
+- *Reason:* Plain Parquet files per load are what the PySpark implementation and evaluation will read, so the engines exchange nothing but files. Rerunning a load overwrites its outputs and reads only the previous load, so reruns are idempotent.
 
 ## 19. Publishing on GitHub
 

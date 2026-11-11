@@ -1,11 +1,11 @@
 # Matching Rules
 
 This document explains each matching rule, with a worked example and the reason for it. The
-formal rules are in [DESIGN.md sections 5–9](DESIGN.md#5-standardization). The Python
+formal rules are in [DESIGN.md sections 5–11](DESIGN.md#5-standardization). The Python
 reference implementation is in `standardization/`. Every example below is a scenario test
 in `tests/test_scenarios.py`, and the dbt and PySpark implementations must reproduce them.
 
-Blocking, clustering and ID reconciliation are added in build phase 5.
+Sections 5–7 cover the steps around the pair rules: which pairs are compared, how matched pairs become people, and how person IDs stay stable. Blocking and clustering are tested in `tests/test_blocking.py` and `tests/test_clustering.py`; `tests/test_dbt.py` checks that dbt reproduces every step.
 
 **The principle:** one imperfect field per automatic match. A pair the rules cannot decide is
 a no-match with a reason code, never a guess. The default profile is conservative, because in
@@ -111,7 +111,64 @@ The twins blocker needs both first names, so a newborn's BABY GIRL record still 
 later named record (D-035). It does not fire on an exact SSN: same SSN, DOB and last name with a
 new first name is a legal name change, which is Tier 1 (D-036).
 
-## 5. Known weaknesses
+## 5. Blocking
+
+Comparing every record with every other is too slow, so only records that share a *blocking
+key* are compared. Five keys together catch every tier and blocker even when one field has an
+error (D-040):
+
+| Key | Example value | Catches |
+|---|---|---|
+| SSN | `234567801` | Tiers 1 and 3, SSN conflicts, parent and child on one SSN |
+| DOB | `1980-05-06` | Tiers 2 and 4, twins |
+| Sorted SSN digits + birth year | `012345678\|1980` | Two SSN digits transposed |
+| First 5 SSN digits + birth year | `23456\|1980` | A typo in the last four digits |
+| Phonetic last name + first initial + birth year | `MLR\|C\|1980` | A name-led match where SSN and DOB both have errors |
+
+A record lacking a field gets no value for the keys that need it. A block with more than
+`max_block_size` records is skipped and reported in `skipped_blocks`. A sudden large block
+usually means a new placeholder value, such as `999-99-9999`, that standardization does not
+know yet.
+
+## 6. Clustering
+
+Matches are pairs; people are clusters. Joining every matched pair would let one bad chain
+merge people that a blocker separated: if A matches B and B matches C, but A and C are twins,
+A, B and C must not become one person.
+
+Clustering joins matched pairs one at a time, strongest tier first and then in record-key
+order. Two groups are joined only if no blocked pair would end up inside the result. A
+refused join is kept in `skipped_joins` with reason `SKIPPED_TRANSITIVITY`, along with the
+blocked pair that stopped it.
+
+*Example:* JOHN SMITH SR (A) and JOHN SMITH JR (C) are blocked by their suffixes. A record
+JOHN SMITH (B), with no suffix, matches C at Tier 1 and A at Tier 3. The Tier 1 join B–C
+happens first; A–B is then refused, so A stays a separate person and the refusal is
+reported with A–C as the reason.
+
+The algorithm is a Python function shared by both engines, because it is sequential by
+nature and the result must be identical (D-006). The cluster id is the smallest record key
+in the cluster (D-041).
+
+## 7. Person IDs
+
+Clusters are recomputed every load, so their ids can change. Person IDs (`P000000123`) are
+carried over from the previous load and change only when the data justifies it:
+
+| Change | Result |
+|---|---|
+| A cluster holds the records of one previous ID | Keeps it |
+| Two previous IDs are now one cluster | The older ID survives; the other is retired as `MERGED`, pointing to it |
+| One previous ID is split | The part with most of its records keeps it; the rest get new IDs |
+| A cluster has no records seen before | New ID |
+| All records of an ID are deleted | Retired as `ALL_DELETED` |
+
+Retired IDs are never issued again, and `person_id_crosswalk` lets downstream systems follow
+a merge. A record deleted and later re-created with the same source ID is treated as a new
+record, since source systems reuse IDs for different people (D-041). Running the same load
+twice changes no ID.
+
+## 8. Known weaknesses
 
 These are generated deliberately and measured in [RESULTS.md](RESULTS.md):
 

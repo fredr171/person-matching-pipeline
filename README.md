@@ -2,11 +2,11 @@
 
 <!-- CI badge goes here once the GitHub repository exists. -->
 
-> **Status: under construction.** Build phases 1–4 of 8 are complete: repository skeleton,
-> configuration, reference data, the synthetic data generator, CDC ingestion, and the Python
-> reference implementation of standardization, comparison, match tiers and blockers
-> ([matching rules](docs/MATCHING_RULES.md)). Results and the full quickstart arrive in later phases;
-> see [build phases](docs/DESIGN.md#17-build-phases).
+> **Status: under construction.** Build phases 1–5 of 8 are complete: the synthetic data
+> generator, CDC ingestion, the Python reference rules, and the full dbt-on-DuckDB matching
+> pipeline with constrained clustering and stable person IDs
+> ([matching rules](docs/MATCHING_RULES.md)). Evaluation, PySpark and results arrive in later
+> phases; see [build phases](docs/DESIGN.md#17-build-phases).
 
 **The problem.** The same person shows up in many source systems under slightly
 different identities: a typo in the SSN, a nickname, a married name, a date of birth
@@ -57,6 +57,7 @@ make install                       # Windows without make: see below
 make check-config
 make generate                      # small preset: 13 monthly loads in a few seconds
 make ingest                        # apply the CDC events to a current-state table
+make match-dbt                     # match every load with dbt + DuckDB (about 2 minutes)
 make test
 ```
 
@@ -68,6 +69,7 @@ python -m pip install --no-deps -e .
 python -m pipeline check-config
 python -m pipeline generate --preset small
 python -m pipeline ingest
+python -m pipeline match-dbt --profile conservative
 python -m pytest
 ```
 
@@ -83,8 +85,8 @@ The full PySpark run is supported on Linux and macOS, and on Windows via WSL
 | `pipeline/` | Shared config and reference loaders, paths, CLI |
 | `generator/` | Synthetic population and CDC event generator |
 | `ingestion/` | CDC events to current state |
-| `standardization/` | Python reference implementation of standardization |
-| `matching_dbt/` | dbt project (DuckDB) |
+| `standardization/` | Python reference rules: standardization, blocking, comparison, tiers, blockers; shared similarity UDFs |
+| `matching_dbt/` | dbt project (DuckDB): the SQL matching implementation |
 | `matching_spark/` | PySpark implementation |
 | `clustering/` | Shared constrained clustering and stable ID reconciliation |
 | `evaluation/` | Metrics against ground truth (the only pipeline package that may read it) |
@@ -113,7 +115,56 @@ real impact will be reported here.
 
 ## Example queries
 
-*Coming in phase 5.*
+Each load's matching outputs are Parquet files in `data/matched/<engine>/<profile>/load_NNNN/`
+([all tables](docs/DESIGN.md#13-outputs-per-run)). Any DuckDB session can query them, for example
+`python -c "import duckdb; print(duckdb.sql('...'))"` from the repository root.
+
+All pairs blocked as twins in the last small-preset load, with their names:
+
+```sql
+select p.record_key_a, p.record_key_b, a.first_name as first_a, b.first_name as first_b,
+       a.last_name, a.dob, p.ssn_level
+from 'data/matched/dbt/conservative/load_0012/match_pairs.parquet' p
+join 'data/matched/dbt/conservative/load_0012/records_standardized.parquet' a
+  on a.record_key = p.record_key_a
+join 'data/matched/dbt/conservative/load_0012/records_standardized.parquet' b
+  on b.record_key = p.record_key_b
+where p.reason_code = 'BLOCKED_TWINS';
+```
+
+All matches clustering refused, with the blocked pair that stopped each one:
+
+```sql
+select record_key_a, record_key_b, tier,
+       conflict_record_key_a, conflict_record_key_b, conflict_reason_code
+from 'data/matched/dbt/conservative/load_0012/skipped_joins.parquet';
+```
+
+All person IDs merged this load, and the ID each now points to:
+
+```sql
+select retired_id, successor_id
+from 'data/matched/dbt/conservative/load_0012/person_id_crosswalk.parquet'
+where reason = 'MERGED';
+```
+
+Merges and deletions across every load:
+
+```sql
+select load_id, reason, count(*) as ids
+from 'data/matched/dbt/conservative/load_*/person_id_crosswalk.parquet'
+group by all
+order by all;
+```
+
+Why pairs did or did not match, by reason code:
+
+```sql
+select metric as reason_code, value as pairs
+from 'data/matched/dbt/conservative/load_0012/run_metrics.parquet'
+where metric_group = 'reason_code'
+order by value desc;
+```
 
 ## License
 
