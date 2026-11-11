@@ -2,8 +2,8 @@
 
 <!-- CI badge goes here once the GitHub repository exists. -->
 
-> **Status: under construction.** Build phase 1 of 8 (repository skeleton, configuration,
-> reference data) is complete. Results and the full quickstart arrive in later phases;
+> **Status: under construction.** Build phases 1–2 of 8 are complete: repository skeleton,
+> configuration, reference data, and the synthetic data generator. Results and the full quickstart arrive in later phases;
 > see [build phases](docs/DESIGN.md#17-build-phases).
 
 **The problem.** The same person shows up in many source systems under slightly
@@ -16,7 +16,8 @@ can put one patient's allergies on another patient's chart.
 pipeline. It is designed so that every decision can be explained and measured:
 
 - A **synthetic data generator** produces incremental CDC loads with known ground
-  truth and about 60 deliberately exaggerated edge cases.
+  truth and 60 deliberately exaggerated edge cases
+  ([catalog](docs/DATA_GENERATION.md)).
 - An **ingestion layer** turns raw CDC events into a clean current-state table.
 - **Matching runs twice**, in dbt on DuckDB and in PySpark, and the two must give
   identical results.
@@ -52,6 +53,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 make install                       # Windows without make: see below
 make check-config
+make generate                      # small preset: 13 monthly loads in a few seconds
 make test
 ```
 
@@ -61,6 +63,7 @@ Every `make` target wraps a Python command, so on Windows without `make` you can
 python -m pip install -r requirements-lock.txt
 python -m pip install --no-deps -e .
 python -m pipeline check-config
+python -m pipeline generate --preset small
 python -m pytest
 ```
 

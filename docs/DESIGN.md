@@ -44,7 +44,7 @@ person-matching-pipeline/
 │   ├── matching.yaml          # profiles, thresholds, blocker settings
 │   └── reference/             # nicknames.csv, placeholders.csv, particles.csv, suffixes.csv
 ├── pipeline/                  # shared plumbing: config + reference loaders, paths, CLI
-├── generator/                 # synthetic data + CDC event generator
+├── generator/                 # synthetic data + CDC event generator; name lists in generator/data/
 ├── ingestion/                 # CDC -> current-state table
 ├── standardization/           # Python reference implementation + shared similarity functions
 ├── matching_dbt/              # dbt project (DuckDB); seeds read from config/reference/
@@ -64,6 +64,7 @@ Reference data (nicknames, placeholders, particles) lives in one place and is re
 Each load `N` writes to `data/loads/load_NNNN/`:
 
 - `events.parquet`: the CDC feed the pipeline reads.
+- `manifest.json`: load id, load date and event count. The pipeline may read it; the load date is what "today" means for future-DOB and newborn checks (D-026).
 - `truth.parquet`: ground truth, written to a separate directory tree (`data/truth/`). **No pipeline code may read truth files.** Only `evaluation/` and tests may.
 
 ### 3.2 Event schema (`events.parquet`)
@@ -92,6 +93,8 @@ Each load `N` writes to `data/loads/load_NNNN/`:
 | true_person_id | The real person this record represents |
 | edge_case_tags | List of edge case codes applied to this record (section 3.7) |
 | load_id | Load in which this truth row became effective |
+
+A truth row is written when a record life starts and whenever its tag list changes. The truth for a record at load N is its latest row with `load_id <= N`; a reused source ID (SOURCE_ID_REUSE) therefore maps to a different person from the load it is reused (D-025).
 
 ### 3.4 Presets
 
@@ -479,6 +482,41 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Decision:* Pin `pandas==2.3.3`.
 - *Alternatives:* pandas 3.1.1 (latest).
 - *Reason:* PySpark 4.3.0 emits "PySpark does not yet fully support pandas >= 3.0.0" and recommends pandas < 3. `applyInPandas` is central to the shared clustering (D-006), so the supported version wins. The pytest config turns that warning into a failure, so an accidental upgrade is caught.
+
+**D-020 · 2026-11-11 · At most one distortion per field per record**
+- *Decision:* A record field (first name, last name, SSN, DOB, gender, name order) carries at most one distortion. Distortions of different fields stack, and life events stack on a person.
+- *Alternatives:* Let every case apply independently, so one SSN could get a typo and a placeholder.
+- *Reason:* Two distortions on one field make the tag meaningless. A "typo'd placeholder" is neither a typo nor a placeholder, and the expected outcome in section 3.7 can't be checked. Stacking across fields still produces compound cases, such as an SSN typo plus a nickname.
+
+**D-021 · 2026-11-11 · Generator draws nicknames and transliterations from the matcher's table**
+- *Decision:* `NAME_NICKNAME` and `NAME_TRANSLITERATION` use `config/reference/nicknames.csv`. Phonetic variants use a separate generator list that a test verifies against Double Metaphone.
+- *Alternatives:* An independent nickname source for the generator, so some variants are unknown to the matcher.
+- *Reason:* Section 3.7 defines the expected outcome as "via nickname table", which requires table coverage. The circularity is stated in `DATA_GENERATION.md`: measured recall on these two cases is an upper bound.
+
+**D-022 · 2026-11-11 · Per-source formatting and missingness as baseline noise**
+- *Decision:* Each source has its own name casing, DOB and SSN format, and missing-SSN and missing-gender rates (`source_systems` in `generator.yaml`). These are not edge cases and are not tagged.
+- *Alternatives:* One uniform format, with all variation coming from tagged edge cases.
+- *Reason:* Real sources always disagree on formats. Missing SSNs are needed to exercise Tier 4 and COMMON_NAME_SAME_DOB. Standardization must handle every format.
+
+**D-023 · 2026-11-11 · How edge cases are applied and tagged**
+- *Decision:* Population, timeline, record and pipeline cases are applied by separate modules, and a test checks they cover the catalog exactly. A case is tagged on every record it affects. For relationship cases (twins, fraud, JR/SR, copies) that means *both sides*. Life events are tagged from the load they happen. Rates for cases that only some units qualify for were raised so each one is measurable at the medium preset.
+- *Alternatives:* Tag only the "deviant" side (e.g. only the fraudster).
+- *Reason:* Evaluation asks whether affected records ended up correctly matched *or correctly separated*. The victim of SSN fraud is as much at risk of a false merge as the fraudster.
+
+**D-024 · 2026-11-11 · Refresh size counts base operations only**
+- *Decision:* "Records per refresh" (section 3.4) is the number of base inserts, updates and deletes. Edge-case events come on top: corrections, migration re-emits, re-keys, duplicates, replays and late arrivals. A migration re-emits every live record of the migrated source.
+- *Alternatives:* Squeeze edge-case events into the refresh quota.
+- *Reason:* A migration or replay is by nature a burst far larger than a normal month. Capping it would make it unrealistic.
+
+**D-025 · 2026-11-11 · Truth rows are versioned by load**
+- *Decision:* A new truth row is written when a record life starts or its tag list changes. The latest row with `load_id <= N` is the truth at load N.
+- *Alternatives:* A full truth snapshot per load.
+- *Reason:* Matches the section 3.3 schema ("load in which this truth row became effective"), handles reused source IDs, and keeps truth files small.
+
+**D-026 · 2026-11-11 · Per-load manifest with the load date**
+- *Decision:* Each load directory has a `manifest.json` with its load date (load 0 = `simulation_start`, then monthly). The pipeline may read it.
+- *Alternatives:* Use the wall-clock date; infer the date from `event_ts`.
+- *Reason:* Standardization needs "today" to null out future DOBs and to detect newborns. The wall clock would make results depend on when they are run, and `event_ts` is informational only (section 4).
 
 ## 19. Publishing on GitHub
 
