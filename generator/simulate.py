@@ -65,6 +65,19 @@ class OpCounts:
     deletes: int
 
 
+# Pipeline cases that describe how one key's events were delivered.
+DELIVERY_CASES = frozenset(
+    {
+        "COLUMN_SHIFT",
+        "ENCODING_CORRUPTION",
+        "DUPLICATE_DELIVERY",
+        "BULK_REPLAY",
+        "OUT_OF_ORDER",
+        "LATE_AFTER_DELETE",
+    }
+)
+
+
 def plan_refresh_ops(ctx: Context, preset: Preset, rng: np.random.Generator) -> list[OpCounts]:
     """Draw insert/update/delete counts for every refresh load up front.
 
@@ -323,7 +336,8 @@ class Simulation:
                 old.created_load,
                 overrides=dict(old.overrides),
                 flags=dict(old.flags),
-                tags=dict(old.tags),
+                # Delivery cases describe events of the old key, not the new one.
+                tags={c: s for c, s in old.tags.items() if c not in DELIVERY_CASES},
             )
             new.tag("SOURCE_ID_CHANGE", self.load_id)
             old.person.records.append(new)
