@@ -23,7 +23,6 @@ EXIT_NOT_IMPLEMENTED = 2
 
 # Command -> build phase that implements it.
 _PLANNED_COMMANDS: dict[str, tuple[int, str]] = {
-    "evaluate": (6, "Score results against ground truth"),
     "match-spark": (7, "Run matching with PySpark"),
 }
 
@@ -65,9 +64,29 @@ def _build_parser() -> argparse.ArgumentParser:
         "--through-load", type=int, default=None, help="Stop after this load (default: all)"
     )
 
+    evaluate = sub.add_parser("evaluate", help="Score matched loads against ground truth")
+    evaluate.add_argument(
+        "--profile", default=None, help="conservative | balanced | aggressive (default: config)"
+    )
+    evaluate.add_argument("--engine", default="dbt", choices=["dbt", "spark"], help="Engine")
+    evaluate.add_argument(
+        "--data-dir", type=Path, default=paths.DEFAULT_DATA_DIR, help="Data directory"
+    )
+    evaluate.add_argument(
+        "--through-load", type=int, default=None, help="Stop after this load (default: all)"
+    )
+
+    results = sub.add_parser(
+        "results", help="Render docs/RESULTS.md from the evaluations of every profile"
+    )
+    results.add_argument("--engine", default="dbt", choices=["dbt", "spark"], help="Engine")
+    results.add_argument(
+        "--data-dir", type=Path, default=paths.DEFAULT_DATA_DIR, help="Data directory"
+    )
+
     for name, (phase, help_text) in _PLANNED_COMMANDS.items():
         command = sub.add_parser(name, help=f"{help_text} (phase {phase})")
-        if name in {"match-spark", "evaluate"}:
+        if name == "match-spark":
             command.add_argument(
                 "--profile", default=None, help="conservative | balanced | aggressive"
             )
@@ -148,6 +167,29 @@ def _match_dbt(profile: str | None, data_dir: Path, through_load: int | None) ->
     return EXIT_OK
 
 
+def _evaluate(profile: str | None, engine: str, data_dir: Path, through_load: int | None) -> int:
+    from evaluation.run import evaluate_all
+
+    name = config.load_matching_config().profile(profile).name
+    for e in evaluate_all(engine, name, data_dir, through_load):
+        p, churn = e.pairwise, e.instability
+        print(
+            f"load {e.load_id:>2}: precision {p.precision or 0:.4f}, recall {p.recall or 0:.4f}, "
+            f"F1 {p.f1 or 0:.4f}, blocking recall {e.stages.blocking_recall or 0:.4f}, "
+            f"false-merge records {e.outcome_counts.get('FALSE_MERGE', 0):,}"
+            + (f", ID changes {churn.changed:,}" if churn else "")
+        )
+    print(f"Wrote {paths.evaluation_dir(engine, name, 0, data_dir).parent}")
+    return EXIT_OK
+
+
+def _results(engine: str, data_dir: Path) -> int:
+    from evaluation.report import write_results
+
+    print(f"Wrote {write_results(data_dir, engine)}")
+    return EXIT_OK
+
+
 def _docs() -> int:
     from generator.docs import write_docs
 
@@ -166,6 +208,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _ingest(args.data_dir, args.through_load)
     if args.command == "match-dbt":
         return _match_dbt(args.profile, args.data_dir, args.through_load)
+    if args.command == "evaluate":
+        return _evaluate(args.profile, args.engine, args.data_dir, args.through_load)
+    if args.command == "results":
+        return _results(args.engine, args.data_dir)
 
     if args.command == "check-config":
         try:

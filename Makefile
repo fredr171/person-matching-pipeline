@@ -8,7 +8,7 @@ SEED ?=
 
 SEED_ARG := $(if $(SEED),--seed $(SEED),)
 
-.PHONY: help install check-config docs generate ingest match-dbt match-spark evaluate test lint format
+.PHONY: help install check-config docs generate ingest match-dbt match-spark evaluate results test lint format
 
 help:
 	@echo "make install      Install pinned dependencies and the project (editable)"
@@ -18,7 +18,8 @@ help:
 	@echo "make ingest       Apply CDC events to current state"
 	@echo "make match-dbt    Run matching with dbt on DuckDB (PROFILE=$(PROFILE))"
 	@echo "make match-spark  Run matching with PySpark       (PROFILE=$(PROFILE))"
-	@echo "make evaluate     Score results against ground truth"
+	@echo "make evaluate     Score results against ground truth (PROFILE=$(PROFILE))"
+	@echo "make results      Match and evaluate every profile, then write docs/RESULTS.md"
 	@echo "make test         Run the test suite"
 	@echo "make lint         Lint and check formatting"
 
@@ -40,6 +41,10 @@ match-spark:
 
 evaluate:
 	$(PYTHON) -m pipeline evaluate --profile $(PROFILE)
+
+results:
+	$(foreach p,conservative balanced aggressive,$(PYTHON) -m pipeline match-dbt --profile $(p) && $(PYTHON) -m pipeline evaluate --profile $(p) &&) true
+	$(PYTHON) -m pipeline results
 
 test:
 	$(PYTHON) -m pytest

@@ -55,6 +55,19 @@ def warehouse_path(engine: str, profile: str, data_dir: Path = DEFAULT_DATA_DIR)
     return data_dir / "warehouse" / f"{engine}_{profile}.duckdb"
 
 
+def evaluation_dir(
+    engine: str, profile: str, load_id: int, data_dir: Path = DEFAULT_DATA_DIR
+) -> Path:
+    """Evaluation results for one engine, profile and load.
+
+    For example ``data/evaluation/dbt/conservative/load_0003/``. Written by
+    ``evaluation/`` from ground truth, so no pipeline code reads it.
+    """
+    if load_id < 0:
+        raise ValueError(f"load_id must be non-negative, got {load_id}")
+    return data_dir / "evaluation" / engine / profile / f"load_{load_id:04d}"
+
+
 def truth_dir(load_id: int, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
     """Directory holding one load's ground truth: ``data/truth/load_NNNN/``.
 
