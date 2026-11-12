@@ -1,6 +1,6 @@
 # Person Matching Pipeline
 
-<!-- CI badge goes here once the GitHub repository exists. -->
+[![CI](https://github.com/fredr171/person-matching-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/fredr171/person-matching-pipeline/actions/workflows/ci.yml)
 
 **The problem.** The same person shows up in many source systems under slightly
 different identities: a typo in the SSN, a nickname, a married name, a date of birth
