@@ -658,6 +658,11 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Alternatives:* Running the large preset in chunks on the development laptop; renting a larger machine.
 - *Reason:* The project exists mainly to show the design and engineering, and the medium preset already exercises every rule, edge case and table: 27 million rows compared identical across engines. On a 7.6 GB laptop the medium Spark run already needed chunking to stay within memory, so the large run would take days for little additional evidence. Scale is listed as an open limitation rather than claimed.
 
+**D-048 · 2026-11-12 · A README for a 60-second read** (decided by the project owner after review feedback)
+- *Decision:* The README opens with a three-line summary and a results table, states decisions in plain words without decision IDs, and links to `docs/RUNNING.md` for running without `make`, Spark platform notes, reproducing the results and the example queries. The repository description, README and GitHub topics use the terms entity resolution, record linkage and master patient index.
+- *Alternatives:* Keeping the queries and platform notes in the README, as section 19 first specified.
+- *Reason:* A reviewer skims the landing page in about a minute. Decision IDs mean nothing outside the design document, and operational detail matters only to someone running the project, who will follow the link.
+
 ## 19. Publishing on GitHub
 
 The repository is public on my personal GitHub profile and should read well to someone who spends two minutes on it.
@@ -669,12 +674,12 @@ The repository is public on my personal GitHub profile and should read well to s
 - Commit in small, logical steps with clear messages, at least one commit per build phase, so the history itself shows how the project was built.
 
 **README (the landing page)**
-- Opens with a short summary of the problem, the approach, and the headline results, before any setup instructions.
+- Opens with a three-line summary (what it is, the headline numbers, the stack), then the problem, the approach and the results, before any setup instructions. It uses the terms people search for: entity resolution, record linkage, master patient index (D-048).
 - A diagram of the pipeline: generator → ingestion → matching (dbt and PySpark) → clustering → ID reconciliation → evaluation.
 - A quickstart that runs end to end on the small preset in a few minutes from a fresh clone.
-- The key design decisions in brief, each linking to the full reasoning in `docs/`.
+- The key design decisions in brief, in plain words, linking to the decision log for the reasoning (decision IDs stay in `docs/`).
 - A results table and chart across profiles, and a known limitations section.
-- Example queries for pulling edge cases by reason code.
+- A link to example queries for pulling edge cases by reason code, which live in `docs/RUNNING.md` with the platform notes and full run instructions.
 
 **Continuous integration**
 - A GitHub Actions workflow runs the full test suite, including parity and idempotency tests, on the small preset for every push and pull request.
