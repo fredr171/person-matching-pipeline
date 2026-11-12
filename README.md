@@ -5,7 +5,7 @@
 **The problem.** The same person shows up in many source systems under slightly
 different identities: a typo in the SSN, a nickname, a married name, a date of birth
 with month and day swapped. Some look-alikes really are different people, such as
-twins, a father and son, or a fraudster using a stolen SSN. Merging them by mistake
+twins, a father and son, or two people whose records share an SSN. Merging them by mistake
 can put one patient's allergies on another patient's chart.
 
 **The approach.** This project builds a rule-based, fully automated person matching
@@ -164,7 +164,7 @@ Some cases cannot be solved with five fields. Each is generated on purpose and m
 
 | Case | What happens | Pair precision | Pair recall |
 |---|---|---:|---:|
-| Full identity copy (a stolen identity, all fields copied) | usually merged with the victim | 0.605 | 0.695 |
+| Full identity copy (another person's records repeat all five values) | usually merged | 0.605 | 0.695 |
 | Identical strangers (different people, same values) | usually merged | 0.588 | 0.700 |
 | SSN replacement (new SSN issued) | the two SSNs stay apart | 0.992 | 0.460 |
 | Full name change (first and last name at once) | about half stay apart | 1.000 | 0.746 |
