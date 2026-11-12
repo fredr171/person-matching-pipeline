@@ -152,3 +152,32 @@ def test_letters_agree_with_unicode_decomposition(reference_data):
 def test_genders_map_only_to_standard_values(reference_data):
     assert set(reference_data.genders.values()) == {"M", "F", "X"}
     assert reference_data.genders["F"] == "F" and "U" not in reference_data.genders
+
+
+def test_nfc_never_changes_a_cleaned_name(reference_data):
+    """Spark has no NFC function, so the letter table must make NFC redundant (D-029).
+
+    For every letter in Unicode, alone and decomposed, cleaning with and without
+    the NFC step gives the same result.
+    """
+    import unicodedata
+    from unittest import mock
+
+    from standardization import standardize
+
+    letters = reference_data.letters
+
+    def without_nfc(text):
+        with mock.patch.object(standardize.unicodedata, "normalize", lambda form, s: s):
+            return standardize.clean_name(text, letters)
+
+    differing = []
+    for code_point in range(0x80, 0x30000):
+        char = chr(code_point)
+        if unicodedata.category(char)[0] not in "LM":
+            continue
+        for text in (f"A{char}B", f"A{unicodedata.normalize('NFD', char)}B"):
+            if standardize.clean_name(text, letters) != without_nfc(text):
+                differing.append(f"U+{code_point:04X}")
+                break
+    assert differing == []
