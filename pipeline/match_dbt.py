@@ -16,58 +16,33 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 from pipeline import config, paths
+from pipeline.runs import (
+    OUTPUT_TABLES,  # noqa: F401 - re-exported for callers of this module
+    LoadRun,
+    available_ingested_loads,
+    current_records,
+    load_date,
+    previous_output_dir,
+    read_metrics,
+)
 
 ENGINE = "dbt"
-OUTPUT_TABLES = (
-    "records_standardized",
-    "match_pairs",
-    "clusters",
-    "skipped_joins",
-    "skipped_blocks",
-    "person_assignment",
-    "person_id_crosswalk",
-    "id_state",
-    "run_metrics",
-)
 
 
 class DbtRunError(RuntimeError):
     """Raised when dbt fails for a load."""
 
 
-@dataclass(frozen=True)
-class LoadRun:
-    load_id: int
-    output_dir: Path
-    seconds: float
-    metrics: dict[tuple[str, str], int]
-
-
-def load_date(load_id: int, data_dir: Path) -> str:
-    manifest = paths.load_dir(load_id, data_dir) / "manifest.json"
-    return json.loads(manifest.read_text(encoding="utf-8"))["load_date"]
-
-
 def dbt_vars(
     load_id: int, data_dir: Path, matching: config.MatchingConfig, profile: config.Profile
 ) -> dict:
     """The dbt vars for one load: inputs, outputs and every profile parameter."""
-    current = paths.ingested_dir(load_id, data_dir) / "current_records.parquet"
-    if not current.is_file():
-        raise FileNotFoundError(f"Load {load_id} has not been ingested ({current}); run `ingest`")
-    previous = ""
-    if load_id > 0:
-        previous_dir = paths.matched_dir(ENGINE, profile.name, load_id - 1, data_dir)
-        if not (previous_dir / "person_assignment.parquet").is_file():
-            raise FileNotFoundError(
-                f"Load {load_id - 1} has not been matched with profile {profile.name} "
-                f"({previous_dir}); match earlier loads first"
-            )
-        previous = previous_dir.as_posix()
+    current = current_records(load_id, data_dir)
+    previous_dir = previous_output_dir(ENGINE, profile.name, load_id, data_dir)
+    previous = previous_dir.as_posix() if previous_dir else ""
     return {
         "load_id": load_id,
         "load_date": load_date(load_id, data_dir),
@@ -104,13 +79,6 @@ def run_dbt(args: list[str], warehouse: Path) -> None:
         raise DbtRunError(f"dbt {' '.join(args[:1])} failed: {detail}")
 
 
-def read_metrics(output_dir: Path) -> dict[tuple[str, str], int]:
-    import pyarrow.parquet as pq
-
-    table = pq.read_table(output_dir / "run_metrics.parquet").to_pylist()
-    return {(row["metric_group"], row["metric"]): row["value"] for row in table}
-
-
 def match_load(
     load_id: int,
     data_dir: Path = paths.DEFAULT_DATA_DIR,
@@ -130,11 +98,6 @@ def match_load(
     return LoadRun(load_id, output_dir, time.perf_counter() - started, read_metrics(output_dir))
 
 
-def available_ingested_loads(data_dir: Path) -> list[int]:
-    root = data_dir / "ingested"
-    return sorted(int(p.name.split("_")[1]) for p in root.glob("load_*") if p.is_dir())
-
-
 def match_all(
     data_dir: Path = paths.DEFAULT_DATA_DIR,
     profile_name: str | None = None,
@@ -142,10 +105,5 @@ def match_all(
 ):
     """Match every ingested load in order, from load 0; yields one LoadRun per load."""
     matching = config.load_matching_config()
-    loads = available_ingested_loads(data_dir)
-    if not loads:
-        raise FileNotFoundError(f"No ingested loads under {data_dir / 'ingested'}; run `ingest`")
-    if through_load is not None:
-        loads = [load for load in loads if load <= through_load]
-    for load_id in loads:
+    for load_id in available_ingested_loads(data_dir, through_load):
         yield match_load(load_id, data_dir, profile_name, matching)
