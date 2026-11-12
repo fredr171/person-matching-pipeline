@@ -40,6 +40,10 @@ over all pairs of records.
 | balanced | 0.992 | 0.712 | 797 | 0.12% |
 | aggressive | 0.974 | 0.906 | 2,982 | 0.08% |
 
+*Balanced* only lowers the fuzzy name-score threshold, and on this data names nearly always
+match exactly, as a known nickname or phonetically first, so it adds just 0.3% more matches.
+The big lever is matching on name and DOB without an SSN, which only *aggressive* allows.
+
 - **Precision holds; recall is the price.** 87% of the true pairs the conservative profile
   misses involve a record with no usable SSN or DOB (placeholders, ITINs, migration defaults).
   Matching those needs name and DOB alone, which only the aggressive profile allows.
