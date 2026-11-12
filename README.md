@@ -143,6 +143,14 @@ the largest load it can write.
 | `pipeline/` | Config and reference loaders, CLI, engine comparison |
 | `tests/` | Unit, scenario, parity, idempotency and determinism tests |
 
+## How it was built
+
+I designed this project and built it with [Claude Code](https://claude.com/claude-code)
+as an AI pair programmer: I set the requirements and the design, made the decisions, and
+reviewed the work, and Claude Code wrote much of the implementation. The
+[decision log](docs/DESIGN.md#18-decision-log) records every choice with its alternatives
+and reasoning, and the tests and the dbt/PySpark parity check verify the result.
+
 ## License
 
 [MIT](LICENSE). All data is synthetic; no real people or SSNs appear anywhere in this
