@@ -4,7 +4,7 @@ This document is the source of truth for the project. Code, tests, and the READM
 
 ## 1. Goals
 
-Build a portfolio-quality person matching (entity resolution) system that shows the decisions behind the logic, not just the code. The project will be published as a **public repository on my personal GitHub profile**. The audience is potential employers and hiring managers in data engineering and analytics engineering, so the repo must be easy to understand at a glance, easy to run, and clearly documented. See section 19 for GitHub-specific requirements.
+Build a person matching (entity resolution) system that shows the decisions behind the logic, not just the code. The project is a **public repository**, and its readers are data engineers and analytics engineers, so the repo must be easy to understand at a glance, easy to run, and clearly documented. See section 19 for GitHub-specific requirements.
 
 - A Python generator produces a synthetic person dataset delivered as incremental CDC loads, with known ground truth.
 - An ingestion layer turns raw CDC events into a clean current-state table.
