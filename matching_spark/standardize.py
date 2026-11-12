@@ -57,13 +57,28 @@ def nullif_empty(col: Column) -> Column:
 # --------------------------------------------------------------------------- #
 
 
-def clean_name(col: Column, letters: Column) -> Column:
+def map_letters(col: Column, letters: dict[str, str]) -> Column:
+    """Apply the letter table (D-029): one ``translate`` for single-letter results,
+    and one ``regexp_replace`` per multi-letter result (AE, SS, ...).
+
+    Not a map column: Spark inlines a literal map into the generated code at
+    every use, and two 527-entry maps make the code too large to compile.
+    """
+    single = {k: v for k, v in sorted(letters.items()) if len(v) == 1}
+    text = F.translate(col, "".join(single), "".join(single.values()))
+    by_result: dict[str, list[str]] = {}
+    for letter, result in sorted(letters.items()):
+        if len(result) != 1:
+            by_result.setdefault(result, []).append(letter)
+    for result, sources in sorted(by_result.items()):
+        text = F.regexp_replace(text, "[" + "".join(sources) + "]", result)
+    return text
+
+
+def clean_name(col: Column, letters: dict[str, str]) -> Column:
     """Name steps 1-4: letter table, drop marks, apostrophes, ASCII, uppercase,
     punctuation, hyphens/apostrophes only between letters or digits, spaces."""
-    chars = F.regexp_extract_all(col, F.lit("(?s)."), 0)  # one element per code point
-    text = F.array_join(
-        F.transform(chars, lambda ch: F.coalesce(F.try_element_at(letters, ch), ch)), ""
-    )
+    text = map_letters(col, letters)
     text = F.regexp_replace(text, r"[\x{0300}-\x{036F}]", "")
     text = F.translate(text, TYPOGRAPHIC_APOSTROPHES, "'" * len(TYPOGRAPHIC_APOSTROPHES))
     text = F.upper(F.regexp_replace(text, r"[^\x00-\x7F]", " "))
@@ -129,38 +144,64 @@ def name_forms(col: Column, particles: tuple[str, ...], particle_words: Column) 
 # --------------------------------------------------------------------------- #
 
 
-def _ssn_columns(raw: Column, placeholders: Column) -> tuple[Column, Column]:
-    s = F.upper(trim_raw(raw))
-    is_scientific = s.rlike(SCIENTIFIC)
-    is_float_zero = s.rlike(FLOAT_ZERO)
-    mantissa = F.regexp_extract(s, SCIENTIFIC, 2)
-    exponent = F.regexp_extract(s, SCIENTIFIC, 3).try_cast("bigint")
-    unrecoverable = is_scientific & (
-        (F.length(mantissa) < exponent)
-        | (F.regexp_replace(F.substring(mantissa, exponent + 1, 1_000_000), "^0+", "") != "")
-    )
-    digits = (
+def _with_ssn(df: DataFrame, placeholders: Column) -> DataFrame:
+    """Add ``ssn`` and ``ssn_null_reason`` from ``ssn_raw``, in materialized stages.
+
+    Written as one expression, Spark inlines every intermediate value into every
+    use, and the generated code grows past what Spark can compile; it then falls
+    back to interpreting the expression row by row, many times slower.
+    """
+    s = F.col("_ssn_text")
+    df = df.withColumn("_ssn_text", F.upper(trim_raw(F.col("ssn_raw")))).localCheckpoint()
+    df = df.select(
+        "*",
+        s.rlike(SCIENTIFIC).alias("_ssn_scientific"),
+        s.rlike(FLOAT_ZERO).alias("_ssn_float_zero"),
+        F.regexp_extract(s, SCIENTIFIC, 2).alias("_ssn_mantissa"),
+        F.regexp_extract(s, SCIENTIFIC, 3).try_cast("bigint").alias("_ssn_exponent"),
+    ).localCheckpoint()
+    scientific, float_zero = F.col("_ssn_scientific"), F.col("_ssn_float_zero")
+    mantissa, exponent = F.col("_ssn_mantissa"), F.col("_ssn_exponent")
+    df = df.select(
+        "*",
+        (
+            scientific
+            & (
+                (F.length(mantissa) < exponent)
+                | (
+                    F.regexp_replace(F.substring(mantissa, exponent + 1, 1_000_000), "^0+", "")
+                    != ""
+                )
+            )
+        ).alias("_ssn_unrecoverable"),
         F.when(
-            is_scientific,
+            scientific,
             F.concat(F.regexp_extract(s, SCIENTIFIC, 1), F.substring(mantissa, 1, exponent)),
         )
-        .when(is_float_zero, F.regexp_extract(s, FLOAT_ZERO, 1))
+        .when(float_zero, F.regexp_extract(s, FLOAT_ZERO, 1))
         .otherwise(F.regexp_replace(s, "[^0-9]", ""))
-    )
-    is_numeric = is_scientific | is_float_zero | s.rlike("^[0-9]+$")
-    padded = F.lpad(digits, 9, "0")
+        .alias("_ssn_digits"),
+        (scientific | float_zero | s.rlike("^[0-9]+$")).alias("_ssn_numeric"),
+    ).localCheckpoint()
+    digits = F.col("_ssn_digits")
+    df = df.withColumn("_ssn_padded", F.lpad(digits, 9, "0")).localCheckpoint()
+    padded = F.col("_ssn_padded")
     reason = (
-        F.when(raw.isNull() | (trim_raw(raw) == ""), "MISSING")
-        .when(unrecoverable, "UNRECOVERABLE")
+        F.when(F.col("ssn_raw").isNull() | (s == ""), "MISSING")
+        .when(F.col("_ssn_unrecoverable"), "UNRECOVERABLE")
         .when(digits == "", "UNPARSEABLE")
-        .when((F.length(digits) > 9) | ((F.length(digits) < 9) & ~is_numeric), "INVALID_LENGTH")
+        .when(
+            (F.length(digits) > 9) | ((F.length(digits) < 9) & ~F.col("_ssn_numeric")),
+            "INVALID_LENGTH",
+        )
         .when(F.array_contains(placeholders, padded), "PLACEHOLDER")
         .when(padded.startswith("9"), "ITIN_OR_TEMPORARY")
         .when(F.substring(padded, 1, 3).isin("000", "666"), "INVALID_AREA")
         .when(F.substring(padded, 4, 2) == "00", "INVALID_GROUP")
         .when(F.substring(padded, 6, 4) == "0000", "INVALID_SERIAL")
     )
-    return F.when(reason.isNull(), padded), reason
+    df = df.withColumn("ssn_null_reason", reason).localCheckpoint()
+    return df.withColumn("ssn", F.when(F.col("ssn_null_reason").isNull(), padded))
 
 
 # --------------------------------------------------------------------------- #
@@ -173,36 +214,65 @@ def iso_date(col: Column) -> Column:
     return F.format_string("%04d-%02d-%02d", F.year(col), F.month(col), F.dayofmonth(col))
 
 
-def _dob_columns(raw: Column, placeholders: Column, today: date) -> tuple[Column, Column]:
-    t = trim_raw(raw)
+def _with_dob(df: DataFrame, placeholders: Column, today: date) -> DataFrame:
+    """Add ``dob`` and ``dob_null_reason`` from ``dob_raw``, in materialized stages.
 
-    def parts(pattern: str, year: int, month: int, day: int, year_offset: int = 0) -> Column:
-        y = F.regexp_extract(t, pattern, year).cast("int") + year_offset
-        return F.array(
-            y,
-            F.regexp_extract(t, pattern, month).cast("int"),
-            F.regexp_extract(t, pattern, day).cast("int"),
-        )
+    Staged for the same reason as ``_with_ssn``.
+    """
+    t = F.col("_dob_text")
+    df = df.withColumn("_dob_text", trim_raw(F.col("dob_raw"))).localCheckpoint()
+    df = df.withColumn(
+        "_dob_format",
+        F.when(t.rlike(DOB_ISO), "ISO")
+        .when(t.rlike(DOB_US), "US")
+        .when(t.rlike(DOB_US_SHORT), "US_SHORT")
+        .when(t.rlike(DOB_COMPACT), "COMPACT"),
+    ).localCheckpoint()
+    fmt = F.col("_dob_format")
 
-    ymd = (
-        F.when(t.rlike(DOB_ISO), parts(DOB_ISO, 1, 2, 3))
-        .when(t.rlike(DOB_US), parts(DOB_US, 3, 1, 2))
-        .when(t.rlike(DOB_US_SHORT), parts(DOB_US_SHORT, 3, 1, 2, 2000))
-        .when(t.rlike(DOB_COMPACT), parts(DOB_COMPACT, 1, 2, 3))
-    )
-    parsed = F.when(
-        ymd[0] >= 1,
-        F.try_to_date(F.format_string("%04d-%02d-%02d", ymd[0], ymd[1], ymd[2]), "yyyy-MM-dd"),
-    )
+    def part(index_by_format: dict[str, int]) -> Column:
+        result = F.lit(None).cast("int")
+        for name, pattern in (
+            ("ISO", DOB_ISO),
+            ("US", DOB_US),
+            ("US_SHORT", DOB_US_SHORT),
+            ("COMPACT", DOB_COMPACT),
+        ):
+            value = F.regexp_extract(t, pattern, index_by_format[name]).cast("int")
+            result = F.when(fmt == name, value).otherwise(result)
+        return result
+
+    df = df.select(
+        "*",
+        (
+            part({"ISO": 1, "US": 3, "US_SHORT": 3, "COMPACT": 1})
+            + F.when(fmt == "US_SHORT", 2000).otherwise(0)
+        ).alias("_dob_y"),
+        part({"ISO": 2, "US": 1, "US_SHORT": 1, "COMPACT": 2}).alias("_dob_m"),
+        part({"ISO": 3, "US": 2, "US_SHORT": 2, "COMPACT": 3}).alias("_dob_d"),
+    ).localCheckpoint()
+    y = F.col("_dob_y")
+    df = df.withColumn(
+        "_dob_parsed",
+        F.when(
+            y >= 1,
+            F.try_to_date(
+                F.format_string("%04d-%02d-%02d", y, F.col("_dob_m"), F.col("_dob_d")),
+                "yyyy-MM-dd",
+            ),
+        ),
+    ).localCheckpoint()
+    parsed = F.col("_dob_parsed")
     reason = (
-        F.when(raw.isNull() | (t == ""), "MISSING")
+        F.when(F.col("dob_raw").isNull() | (t == ""), "MISSING")
         .when(t.rlike("^[0-9]{4}$"), "YEAR_ONLY")
-        .when(ymd.isNull(), "UNPARSEABLE")
+        .when(fmt.isNull(), "UNPARSEABLE")
         .when(parsed.isNull(), "INVALID_DATE")
         .when(F.array_contains(placeholders, iso_date(parsed)), "PLACEHOLDER")
         .when(parsed > F.lit(today), "FUTURE")
     )
-    return F.when(reason.isNull(), parsed), reason
+    df = df.withColumn("dob_null_reason", reason).localCheckpoint()
+    return df.withColumn("dob", F.when(F.col("dob_null_reason").isNull(), parsed))
 
 
 # --------------------------------------------------------------------------- #
@@ -239,7 +309,6 @@ STANDARDIZED_COLUMNS = (
 def standardize_records(records: DataFrame, ref: ReferenceData, today: date) -> DataFrame:
     """One row per live record, with the same columns as dbt's records_standardized."""
     tables = StandardizationTables.from_reference(ref)
-    letters = literal_map(tables.letters)
     suffixes = literal_map(tables.suffixes)
     name_placeholders = literal_array(tables.name_placeholders)
     particle_words = literal_array(tables.particle_words)
@@ -257,9 +326,12 @@ def standardize_records(records: DataFrame, ref: ReferenceData, today: date) -> 
         F.col("dob").alias("dob_raw"),
         F.col("ssn").alias("ssn_raw"),
         F.col("gender").alias("gender_raw"),
-        clean_name(F.col("first_name"), letters).alias("first_clean"),
-        clean_name(F.col("last_name"), letters).alias("last_clean"),
+        clean_name(F.col("first_name"), tables.letters).alias("first_clean"),
+        clean_name(F.col("last_name"), tables.letters).alias("last_clean"),
     )
+    # Spark inlines each derived column into the next, so without materializing
+    # here the per-character cleaning would be recomputed for every later use.
+    df = df.localCheckpoint()
     # Step 5: a trailing suffix token, if another token remains.
     for field in ("first", "last"):
         clean = F.col(f"{field}_clean")
@@ -275,20 +347,17 @@ def standardize_records(records: DataFrame, ref: ReferenceData, today: date) -> 
         df = df.withColumn(f"{field}_name_is_placeholder", is_placeholder).withColumn(
             f"{field}_name", F.when(~is_placeholder, unsuffixed)
         )
+    df = df.localCheckpoint()  # the forms read each name many times
     for field in ("first", "last"):
         df = df.withColumn(
             f"{field}_name_forms",
             name_forms(F.col(f"{field}_name"), tables.particles, particle_words),
         )
 
-    ssn, ssn_reason = _ssn_columns(F.col("ssn_raw"), literal_array(tables.ssn_placeholders))
-    dob, dob_reason = _dob_columns(F.col("dob_raw"), literal_array(tables.dob_placeholders), today)
+    df = _with_ssn(df.localCheckpoint(), literal_array(tables.ssn_placeholders))
+    df = _with_dob(df, literal_array(tables.dob_placeholders), today)
     df = (
         df.withColumn("suffix", F.coalesce("last_suffix", "first_suffix"))
-        .withColumn("ssn", ssn)
-        .withColumn("ssn_null_reason", ssn_reason)
-        .withColumn("dob", dob)
-        .withColumn("dob_null_reason", dob_reason)
         .withColumn(
             "dob_is_jan1",
             F.coalesce((F.month("dob") == 1) & (F.dayofmonth("dob") == 1), F.lit(False)),
