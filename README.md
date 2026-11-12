@@ -89,7 +89,9 @@ python -m pytest
 The PySpark run works on Linux, macOS and native Windows (no WSL or winutils: the driver
 writes outputs with pyarrow, D-011, D-044). It takes about 25 seconds per small load, most of
 it starting Python workers, which Windows cannot reuse (D-046). On a machine short of memory,
-set `PMP_SPARK_DRIVER_MEMORY=1g` and `PMP_SPARK_MASTER=local[4]`.
+set `PMP_SPARK_DRIVER_MEMORY=1g` and `PMP_SPARK_MASTER=local[4]`. If a Spark run is killed rather
+than left to finish, check for a leftover `java.exe`: on Windows the Spark JVM can outlive
+the Python process that started it.
 
 ## Repository layout
 

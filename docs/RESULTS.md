@@ -10,6 +10,16 @@ The edge case rates are deliberately exaggerated (D-008), so these numbers descr
 - Matching engine: dbt. Final load: 12, 127,996 live records, 88,236 true same-person pairs.
 - Each profile was matched load by load from load 0 and scored against the truth in effect at each load.
 
+## Engine parity
+
+Every output table of every load was compared row for row between the dbt and PySpark runs (`python -m pipeline compare-engines`).
+
+| Profile | Loads | Tables | Rows | Result |
+| --- | ---: | ---: | ---: | --- |
+| conservative | 0-12 | 117 | 9,082,428 | identical |
+| balanced | 0-12 | 117 | 9,082,034 | identical |
+| aggressive | 0-12 | 117 | 9,081,133 | identical |
+
 ## Summary by profile
 
 Final load. Precision and recall are pairwise over all pairs of live records. A *false-merge record* has at least one record of another person in its cluster; a *missed-match record* has no wrong records but is missing at least one of its own. ID churn is the mean share of records, live in two consecutive loads, whose person ID changed.
