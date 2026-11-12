@@ -9,6 +9,7 @@ column), but the comparison sorts again so it does not depend on that.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -118,3 +119,24 @@ def compare_engines(
             else:
                 comparison.differences.append(difference)
     return comparison
+
+
+def write_summary(comparison: Comparison, data_dir: Path = paths.DEFAULT_DATA_DIR) -> Path:
+    """Record the outcome for ``python -m pipeline results`` (D-045)."""
+    target = paths.parity_path(comparison.profile, data_dir)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "profile": comparison.profile,
+        "first_load": comparison.loads[0],
+        "last_load": comparison.loads[-1],
+        "tables_compared": comparison.tables_compared,
+        "rows_compared": comparison.rows_compared,
+        "tables_differing": len(comparison.differences),
+    }
+    target.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
+def read_summary(profile: str, data_dir: Path = paths.DEFAULT_DATA_DIR) -> dict | None:
+    path = paths.parity_path(profile, data_dir)
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None

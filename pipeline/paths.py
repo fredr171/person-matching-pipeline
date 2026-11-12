@@ -40,6 +40,14 @@ def ingested_dir(load_id: int, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
     return data_dir / "ingested" / f"load_{load_id:04d}"
 
 
+def parity_path(profile: str, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
+    """The engine comparison summary of one profile.
+
+    For example ``data/matched/parity/conservative.json``.
+    """
+    return data_dir / "matched" / "parity" / f"{profile}.json"
+
+
 def matched_dir(engine: str, profile: str, load_id: int, data_dir: Path = DEFAULT_DATA_DIR) -> Path:
     """Matching outputs for one engine, profile and load.
 

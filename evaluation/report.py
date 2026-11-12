@@ -114,6 +114,39 @@ def _run_section(generation: dict, engine: str, main: ProfileResults) -> list[st
     ]
 
 
+def _parity_section(names: list[str], data_dir: Path) -> list[str]:
+    """Whether the dbt and Spark runs agreed, from ``compare-engines`` summaries (D-045)."""
+    from pipeline.compare_engines import read_summary
+
+    lines = ["## Engine parity", ""]
+    summaries = [read_summary(name, data_dir) for name in names]
+    if not all(summaries):
+        missing = [n for n, s in zip(names, summaries, strict=True) if not s]
+        return lines + [
+            "The PySpark run was not compared with dbt for "
+            + ", ".join(missing)
+            + " (`python -m pipeline compare-engines`).",
+            "",
+        ]
+    rows = [
+        [
+            s["profile"],
+            f"{s['first_load']}-{s['last_load']}",
+            _n(s["tables_compared"]),
+            _n(s["rows_compared"]),
+            "identical" if s["tables_differing"] == 0 else f"{s['tables_differing']} tables differ",
+        ]
+        for s in summaries
+    ]
+    return lines + [
+        "Every output table of every load was compared row for row between the dbt and "
+        "PySpark runs (`python -m pipeline compare-engines`).",
+        "",
+        *_table(["Profile", "Loads", "Tables", "Rows", "Result"], rows, "lrrrl"),
+        "",
+    ]
+
+
 def _summary_section(profiles: list[ProfileResults]) -> list[str]:
     rows = []
     for p in profiles:
@@ -395,6 +428,7 @@ def render_results(data_dir: Path, engine: str = "dbt") -> tuple[str, str]:
         "Definitions are in [DESIGN.md section 14](DESIGN.md#14-evaluation) and D-043.",
         "",
         *_run_section(generation, engine, main),
+        *_parity_section(order, data_dir),
         *_summary_section(profiles),
         *_stages_section(profiles),
         *_reason_section(main),

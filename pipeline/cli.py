@@ -171,10 +171,11 @@ def _match(engine: str, profile: str | None, data_dir: Path, through_load: int |
 
 
 def _compare_engines(profile: str | None, data_dir: Path, through_load: int | None) -> int:
-    from pipeline.compare_engines import compare_engines
+    from pipeline.compare_engines import compare_engines, write_summary
 
     name = config.load_matching_config().profile(profile).name
     result = compare_engines(name, data_dir, through_load)
+    write_summary(result, data_dir)
     for d in result.differences:
         print(f"load {d.load_id:>2} {d.table}: {d.problem}")
         for label, rows in (("dbt only", d.only_dbt), ("spark only", d.only_spark)):
