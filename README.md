@@ -148,7 +148,7 @@ What the numbers say, on the medium preset:
   records, against 9 in the conservative profile.
 - **Most remaining false merges cannot be fixed with five fields.** Of 788 falsely merged
   records in the conservative profile, 720 are full identity copies, identical strangers or
-  near-match attacks.
+  near-copies of another identity.
 - **Blockers protect, at a small cost.** `BLOCKED_TWINS` separates 6,781 pairs of different
   people and blocks 87 same-person pairs. Clustering refuses 268 joins, almost all between
   records of one person, to keep a blocked pair apart.

@@ -350,7 +350,7 @@ def test_ssn_replacement_is_a_known_limitation():
 
 
 # --------------------------------------------------------------------------- #
-# Relationships and fraud
+# Relationships, shared and copied identities
 # --------------------------------------------------------------------------- #
 
 
@@ -449,15 +449,15 @@ def test_identical_values_are_a_known_limitation():
 
 
 @covers("SSN_SHARED_FRAUD")
-def test_shared_ssn_fraud():
-    fraud = {"first_name": "Derek", "last_name": "Novak", "dob": "1972-09-14"}
-    assert_outcome(pair({}, fraud), "BLOCKED_SSN_CONFLICT", False)
+def test_shared_ssn_with_a_different_person():
+    other = {"first_name": "Derek", "last_name": "Novak", "dob": "1972-09-14"}
+    assert_outcome(pair({}, other), "BLOCKED_SSN_CONFLICT", False)
 
 
 @covers("SSN_SHARED_MANY")
-def test_many_fraudsters_on_one_ssn():
-    victim = record()
-    fraudsters = [
+def test_many_people_on_one_ssn():
+    original = record()
+    others = [
         record(first_name=first, last_name=last, dob=dob)
         for first, last, dob in [
             ("Derek", "Novak", "1972-09-14"),
@@ -465,7 +465,7 @@ def test_many_fraudsters_on_one_ssn():
             ("Omar", "Haddad", "1965-07-30"),
         ]
     ]
-    everyone = [victim, *fraudsters]
+    everyone = [original, *others]
     for i, a in enumerate(everyone):
         for b in everyone[i + 1 :]:
             decision = decide_records(a, b)

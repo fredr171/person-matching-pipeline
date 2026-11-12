@@ -308,7 +308,7 @@ def test_newborn_carries_parent_ssn(boosted_population):
         assert all((baby.identity.dob - p.identity.dob).days > 12 * 365 for p in parents)
 
 
-def test_fraudsters_share_the_victims_ssn(boosted_population):
+def test_several_people_share_one_ssn(boosted_population):
     _, persons = boosted_population
     by_ssn = defaultdict(list)
     for p in _with_tag(persons, "SSN_SHARED_MANY"):

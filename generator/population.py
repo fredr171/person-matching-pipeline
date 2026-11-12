@@ -4,7 +4,7 @@ Steps (DESIGN.md section 3.5):
 
 1. **People.** Draw base people (culture, gender, names, SSN, age). For each
    base person, population-level edge cases may create *related* people:
-   a twin, a son with the same name, a fraudster using their SSN. Related
+   a twin, a son with the same name, another person carrying their SSN. Related
    people are real people with their own records, so the matcher has to keep
    them apart.
 2. **Schedule.** Every person draws a record count. All record slots are
@@ -310,23 +310,23 @@ def _full_identity_copy(builder, base, rng):
     return [_copy_identity(builder, base, "FULL_IDENTITY_COPY")]
 
 
-def _fraudsters(builder, base, count, code):
+def _people_sharing_ssn(builder, base, count, code):
     created = []
     for _ in range(count):
-        fraudster = builder.new_person(newborn=False)
-        fraudster.identity.ssn = base.identity.ssn
-        fraudster.tag(code, 0)
-        created.append(fraudster)
+        other = builder.new_person(newborn=False)
+        other.identity.ssn = base.identity.ssn
+        other.tag(code, 0)
+        created.append(other)
     base.tag(code, 0)
     return created
 
 
 def _ssn_shared_fraud(builder, base, rng):
-    return _fraudsters(builder, base, 1, "SSN_SHARED_FRAUD")
+    return _people_sharing_ssn(builder, base, 1, "SSN_SHARED_FRAUD")
 
 
 def _ssn_shared_many(builder, base, rng):
-    return _fraudsters(builder, base, int(rng.integers(3, 9)), "SSN_SHARED_MANY")
+    return _people_sharing_ssn(builder, base, int(rng.integers(3, 9)), "SSN_SHARED_MANY")
 
 
 def _synthetic_identity_eligible(builder, base):

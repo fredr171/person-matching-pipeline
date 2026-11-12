@@ -107,15 +107,15 @@ A field carries at most one distortion (D-020), so an SSN never has both a typo 
 | `COMMON_NAME_SAME_DOB` | Unrelated people with the same common name and DOB. | Eligible only for people whose first and last names are among the most common in their culture; create a second person copying name and DOB, with a different SSN. | No SSN: Tier 4 no-match (conservative) | person | 5% |
 | `IDENTICAL_STRANGERS` | Two unrelated people with identical values in all five fields. | Create a second person copying all five fields. | Known limitation | person | 0.1% |
 
-### Fraud
+### Shared and copied identities
 
 | Code | Description | How it is generated | Expected outcome | Unit | Rate |
 |---|---|---|---|---|---:|
-| `SSN_SHARED_FRAUD` | A different person uses a victim's SSN with their own name and DOB. | Create a fraudster whose records carry the victim's SSN. | BLOCKED_SSN_CONFLICT | person | 0.5% |
-| `SSN_SHARED_MANY` | Several fraudsters share one SSN. | Create 3-8 fraudsters carrying one victim's SSN. | BLOCKED_SSN_CONFLICT; oversized SSN block monitored | person | 0.1% |
+| `SSN_SHARED_FRAUD` | A different person's records carry the same SSN, with their own name and DOB. | Create a second person whose records carry the base person's SSN. | BLOCKED_SSN_CONFLICT | person | 0.5% |
+| `SSN_SHARED_MANY` | Several different people share one SSN. | Create 3-8 people whose records carry the base person's SSN. | BLOCKED_SSN_CONFLICT; oversized SSN block monitored | person | 0.1% |
 | `SYNTHETIC_IDENTITY` | Real SSN combined with another person's name and DOB. | Create an identity from person A's SSN and person B's name and DOB. | BLOCKED_SSN_CONFLICT where detectable | person | 0.2% |
-| `FULL_IDENTITY_COPY` | All five fields copied from a victim. | Create a fraudster whose records copy all five fields. | Known limitation | person | 0.1% |
-| `NEAR_MATCH_ATTACK` | One character changed from a real identity. | Copy a victim's fields and change one character in one field. | Measured; conservative thresholds limit exposure | person | 0.2% |
+| `FULL_IDENTITY_COPY` | All five fields repeated from another person. | Create a second person whose records repeat all five of the base person's values. | Known limitation | person | 0.1% |
+| `NEAR_MATCH_ATTACK` | One character changed from a real identity. | Copy another person's fields and change one character in one field. | Measured; conservative thresholds limit exposure | person | 0.2% |
 
 ### Source system and pipeline
 

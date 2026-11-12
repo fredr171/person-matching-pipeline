@@ -19,7 +19,7 @@ CATEGORY_TITLES = {
     "name": "Name variation",
     "life_event": "Life and legal events",
     "family": "Family and look-alike cases",
-    "fraud": "Fraud",
+    "fraud": "Shared and copied identities",
     "source_pipeline": "Source system and pipeline",
 }
 

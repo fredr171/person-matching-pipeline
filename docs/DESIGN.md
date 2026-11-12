@@ -192,12 +192,12 @@ Each entry has: a code, description, how it is generated, and the expected outco
 | COMMON_NAME_SAME_DOB | Unrelated people, same common name and DOB | No SSN: Tier 4 no-match (conservative) |
 | IDENTICAL_STRANGERS | Two people with identical five fields | Known limitation |
 
-**Fraud**
+**Shared and copied identities**
 
 | Code | Description | Expected outcome |
 |---|---|---|
-| SSN_SHARED_FRAUD | Different person uses victim's SSN with own name/DOB | `BLOCKED_SSN_CONFLICT` |
-| SSN_SHARED_MANY | Several fraudsters share one SSN | `BLOCKED_SSN_CONFLICT`; oversized SSN block monitored |
+| SSN_SHARED_FRAUD | A different person's records carry the same SSN, with their own name/DOB | `BLOCKED_SSN_CONFLICT` |
+| SSN_SHARED_MANY | Several different people share one SSN | `BLOCKED_SSN_CONFLICT`; oversized SSN block monitored |
 | SYNTHETIC_IDENTITY | Real SSN combined with another person's name and DOB | `BLOCKED_SSN_CONFLICT` where detectable |
 | FULL_IDENTITY_COPY | All five fields copied | Known limitation |
 | NEAR_MATCH_ATTACK | One character changed from a real identity | Measured; conservative thresholds limit exposure |
@@ -420,7 +420,7 @@ Record each significant decision with date, decision, alternatives considered, a
 **D-003 · 2026-11-11 · Tier 1 requires only one strong name**
 - *Decision:* Exact SSN + exact DOB + one STRONG name is a match.
 - *Alternatives:* Require both names strong for every tier.
-- *Reason:* Marriage, divorce, adoption and legal first-name changes alter exactly one name. Exact SSN and DOB together are rare enough to carry the match; twins (different SSNs) and parent/child (different DOBs) cannot reach Tier 1, and blockers catch SSN fraud.
+- *Reason:* Marriage, divorce, adoption and legal first-name changes alter exactly one name. Exact SSN and DOB together are rare enough to carry the match; twins (different SSNs) and parent/child (different DOBs) cannot reach Tier 1, and blockers catch a shared SSN.
 
 **D-004 · 2026-11-11 · Full rematch each load**
 - *Decision:* Matching recomputes all pairs every load; stability comes from ID reconciliation, not from incremental matching.
@@ -520,9 +520,9 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Reason:* Real sources always disagree on formats. Missing SSNs are needed to exercise Tier 4 and COMMON_NAME_SAME_DOB. Standardization must handle every format.
 
 **D-023 · 2026-11-11 · How edge cases are applied and tagged**
-- *Decision:* Population, timeline, record and pipeline cases are applied by separate modules, and a test checks they cover the catalog exactly. A case is tagged on every record it affects. For relationship cases (twins, fraud, JR/SR, copies) that means *both sides*. Life events are tagged from the load they happen. Rates for cases that only some units qualify for were raised so each one is measurable at the medium preset.
-- *Alternatives:* Tag only the "deviant" side (e.g. only the fraudster).
-- *Reason:* Evaluation asks whether affected records ended up correctly matched *or correctly separated*. The victim of SSN fraud is as much at risk of a false merge as the fraudster.
+- *Decision:* Population, timeline, record and pipeline cases are applied by separate modules, and a test checks they cover the catalog exactly. A case is tagged on every record it affects. For relationship cases (twins, shared SSNs, JR/SR, copies) that means *both sides*. Life events are tagged from the load they happen. Rates for cases that only some units qualify for were raised so each one is measurable at the medium preset.
+- *Alternatives:* Tag only one side (e.g. only the person carrying another's SSN).
+- *Reason:* Evaluation asks whether affected records ended up correctly matched *or correctly separated*. The person whose SSN appears on someone else's records is as much at risk of a false merge as the other person.
 
 **D-024 · 2026-11-11 · Refresh size counts base operations only**
 - *Decision:* "Records per refresh" (section 3.4) is the number of base inserts, updates and deletes. Edge-case events come on top: corrections, migration re-emits, re-keys, duplicates, replays and late arrivals. A migration re-emits every live record of the migrated source.

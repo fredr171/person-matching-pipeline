@@ -454,18 +454,18 @@ edge_cases:
     unit: person
     rate: 0.001
 
-  # --- Fraud ----------------------------------------------------------------
+  # --- Shared and copied identities -----------------------------------------
   - code: SSN_SHARED_FRAUD
     category: fraud
-    description: A different person uses a victim's SSN with their own name and DOB.
-    generation: Create a fraudster whose records carry the victim's SSN.
+    description: A different person's records carry the same SSN, with their own name and DOB.
+    generation: Create a second person whose records carry the base person's SSN.
     expected_outcome: BLOCKED_SSN_CONFLICT
     unit: person
     rate: 0.005
   - code: SSN_SHARED_MANY
     category: fraud
-    description: Several fraudsters share one SSN.
-    generation: Create 3-8 fraudsters carrying one victim's SSN.
+    description: Several different people share one SSN.
+    generation: Create 3-8 people whose records carry the base person's SSN.
     expected_outcome: BLOCKED_SSN_CONFLICT; oversized SSN block monitored
     unit: person
     rate: 0.001
@@ -478,15 +478,15 @@ edge_cases:
     rate: 0.002
   - code: FULL_IDENTITY_COPY
     category: fraud
-    description: All five fields copied from a victim.
-    generation: Create a fraudster whose records copy all five fields.
+    description: All five fields repeated from another person.
+    generation: Create a second person whose records repeat all five of the base person's values.
     expected_outcome: Known limitation
     unit: person
     rate: 0.001
   - code: NEAR_MATCH_ATTACK
     category: fraud
     description: One character changed from a real identity.
-    generation: Copy a victim's fields and change one character in one field.
+    generation: Copy another person's fields and change one character in one field.
     expected_outcome: Measured; conservative thresholds limit exposure
     unit: person
     rate: 0.002

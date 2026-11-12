@@ -138,7 +138,7 @@ Cases compound and a person's other records carry their own cases, so a tagged r
 | `COMMON_NAME_SAME_DOB` | 2,728 | 1,110: 13.2% / 86.2% / 0.6% | 1,618: 0.1% | 0.980 | 0.231 | No SSN: Tier 4 no-match (conservative) |
 | `IDENTICAL_STRANGERS` | 279 | 150: 2.0% / 19.3% / 78.7% | 129: 68.2% | 0.588 | 0.700 | Known limitation |
 
-### Fraud
+### Shared and copied identities
 
 | Code | Records | With partner: correct / missed / false merge | Without partner: false merge | Pair precision | Pair recall | Expected |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |

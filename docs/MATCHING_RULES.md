@@ -104,7 +104,7 @@ records, even through other records.
 | `BLOCKED_GENERATIONAL` | SSN EXACT or NEAR, DOBs at least 12 years apart | Father and son on one SSN; a newborn recorded with a parent's SSN |
 | `BLOCKED_SUFFIX` | Both suffixes present and different | JOHN SMITH SR vs JOHN SMITH JR |
 | `BLOCKED_TWINS` | Same DOB, last STRONG, both first names present and NONE, SSNs near or different | EMMA and OLIVIA MILLER, born 2010-02-03 |
-| `BLOCKED_SSN_CONFLICT` | Same SSN, different DOB, both names NONE | Someone else using a victim's SSN |
+| `BLOCKED_SSN_CONFLICT` | Same SSN, different DOB, both names NONE | A different person carrying the same SSN |
 | `BLOCKED_GENERATIONAL` (newborn) | A placeholder-named record born within the last year, against a record at least 12 years older | BABY BOY SMITH vs JOHN SMITH, with no SSN shared |
 
 The twins blocker needs both first names, so a newborn's BABY GIRL record still matches its own
