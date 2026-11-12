@@ -103,7 +103,7 @@ A truth row is written when a record life starts and whenever its tag list chang
 |---|---|---|---|
 | small | 1,000 | ~50 | Unit tests, README examples |
 | medium (default) | 100,000 | 2,000–5,000 | Main demo and metrics |
-| large | 5,000,000 | ~100,000 | PySpark scale demonstration |
+| large | 5,000,000 | ~100,000 | PySpark scale demonstration (defined, not run; D-047) |
 
 Refresh mix: about 70% inserts, 25% updates, 5% deletes (configurable).
 
@@ -388,6 +388,8 @@ Run per load and per profile, reading truth only in `evaluation/`:
 
 Not solvable with five fields: full identity copies, unrelated people with identical values, SSN replacement combined with name changes, simultaneous change of first and last name, and mononyms handled with placeholder fill. Each is generated and measured so the README can state its actual impact.
 
+Not yet demonstrated: scale beyond the medium preset. The large preset is defined but has not been matched end to end, so runtime and driver memory there (the Spark run collects each output table on the driver, D-044) are unmeasured (D-047).
+
 ## 17. Build phases
 
 Each phase ends with passing tests and updated docs.
@@ -399,7 +401,7 @@ Each phase ends with passing tests and updated docs.
 5. dbt-duckdb implementation through match_pairs; shared clustering; ID reconciliation.
 6. Evaluation module and metrics.
 7. PySpark implementation and parity tests.
-8. Large preset, scale run, `RESULTS.md`, README polish.
+8. Finish and publish: `RESULTS.md`, README for reviewers, CI running the full suite including parity, known limitations. The large-preset scale run is out of scope (D-047).
 
 ## 18. Decision log
 
@@ -639,7 +641,7 @@ Record each significant decision with date, decision, alternatives considered, a
 **D-044 · 2026-11-11 · PySpark implementation layout** (writing outputs through the driver decided by the project owner)
 - *Decision:* `matching_spark/` mirrors the dbt models as DataFrame code: `standardize.py`, `pairs.py` (blocking, name forms, levels, tiers, blockers), `cluster.py` and `run.py`. Small reference tables become literal map and array columns (the letter table a `translate`, D-046); name variants a broadcast table. Connected components are computed by min-label propagation, iterated to a fixed point with `localCheckpoint`. Each component's members, edges and cannot-links go to `clustering.constrained.cluster_component` through `groupBy(component).applyInArrow`; records in no match edge are singletons and skip it. ID reconciliation runs on the driver with `clustering.ids.reconcile`, as dbt's Python model does. Each table is collected with `toArrow()`, cast to the dbt schema and written, sorted, by pyarrow to `data/matched/spark/<profile>/load_NNNN/`. `python -m pipeline match-spark` runs it.
 - *Alternatives:* `DataFrame.write.parquet` (needs winutils on Windows, writes a directory of part files); GraphFrames for components (an extra JVM package); per-component Python via `applyInPandas`.
-- *Reason:* One file per table in the dbt layout lets evaluation and the parity check read both engines the same way. The shared clustering and reconciliation functions guarantee identical results there; only standardization and pair rules are translated. Collecting to the driver bounds output size by driver memory, which phase 8 checks at the large preset. `applyInArrow` takes an explicit Arrow schema, whereas `applyInPandas` failed to convert the pandas result.
+- *Reason:* One file per table in the dbt layout lets evaluation and the parity check read both engines the same way. The shared clustering and reconciliation functions guarantee identical results there; only standardization and pair rules are translated. Collecting to the driver bounds output size by driver memory, which is unmeasured beyond the medium preset (D-047). `applyInArrow` takes an explicit Arrow schema, whereas `applyInPandas` failed to convert the pandas result.
 
 **D-045 · 2026-11-11 · Engine parity check** (tests plus a compare command decided by the project owner)
 - *Decision:* `python -m pipeline compare-engines` compares every output table of every load between the dbt and Spark runs of a profile: same column names and types, same rows. Nullability flags are not compared, because DuckDB marks columns NOT NULL where it can prove it and Spark does not. `tests/test_spark.py` runs both engines on the first boosted loads, the tricky-values load and the aggressive profile, and requires full parity.
@@ -650,6 +652,11 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Decision:* Double Metaphone codes are computed once per load for every distinct name string. Before each Python step (codes, Jaro-Winkler, clustering) the input is repartitioned to one task per 250,000 rows, capped at the core count. DataFrames built from Python data are created from Arrow tables. The letter table is applied with one `translate` plus one `regexp_replace` per multi-letter result, and SSNs and DOBs are parsed in stages materialized with `localCheckpoint`. Session settings come from `PMP_SPARK_MASTER`, `PMP_SPARK_DRIVER_MEMORY`, `PMP_SPARK_SHUFFLE_PARTITIONS` and `PMP_SPARK_ROWS_PER_PYTHON_TASK`.
 - *Alternatives:* a UDF per stage at the default partition count; computing names on the driver.
 - *Reason:* Windows has no `fork`, so PySpark cannot reuse Python workers there: each Python task starts an interpreter and imports pandas and pyarrow, about three seconds. With 16 tasks per UDF a small load took 80 seconds; sized steps take about 25. A Python list passed to `createDataFrame` becomes pickled rows that only Python workers can read, which cost 16 seconds for a 146-row table. Spark inlines every derived column into each use; as single expressions, the DOB parser and two 527-entry literal maps produced Java code too large to compile, and Spark fell back to interpreting it, which made standardization of a medium load take 143 seconds instead of 25.
+
+**D-047 · 2026-11-12 · No large-preset scale run** (decided by the project owner)
+- *Decision:* Phase 8 finishes and publishes the project instead of running the large preset (5 million records). The preset stays in `config/generator.yaml`, but it has not been generated or matched here. Results and parity are reported on the medium preset (128,000 live records, 13 loads, three profiles).
+- *Alternatives:* Running the large preset in chunks on the development laptop; renting a larger machine.
+- *Reason:* The project exists mainly to show the design and engineering, and the medium preset already exercises every rule, edge case and table: 27 million rows compared identical across engines. On a 7.6 GB laptop the medium Spark run already needed chunking to stay within memory, so the large run would take days for little additional evidence. Scale is listed as an open limitation rather than claimed.
 
 ## 19. Publishing on GitHub
 

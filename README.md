@@ -2,14 +2,6 @@
 
 <!-- CI badge goes here once the GitHub repository exists. -->
 
-> **Status: under construction.** Build phases 1–7 of 8 are complete: the synthetic data
-> generator, CDC ingestion, the Python reference rules, the full dbt-on-DuckDB matching
-> pipeline with constrained clustering and stable person IDs
-> ([matching rules](docs/MATCHING_RULES.md)), evaluation against ground truth
-> ([results](docs/RESULTS.md)), and the PySpark implementation, whose every output table is
-> identical to dbt's. The large-preset run arrives in phase 8; see
-> [build phases](docs/DESIGN.md#17-build-phases).
-
 **The problem.** The same person shows up in many source systems under slightly
 different identities: a typo in the SSN, a nickname, a married name, a date of birth
 with month and day swapped. Some look-alikes really are different people, such as
@@ -36,7 +28,8 @@ pipeline. It is designed so that every decision can be explained and measured:
 **precision 0.992** at recall 0.710. The aggressive profile raises recall to 0.906 at
 precision 0.974, with about four times as many falsely merged records. About 0.1% of
 person IDs change per load, and over 90% of those changes move a record closer to the
-truth.
+truth. The dbt and PySpark implementations produce **identical output**: every table of
+every load, 27 million rows across the three profiles.
 
 ## Pipeline
 
@@ -64,8 +57,8 @@ make install                       # Windows without make: see below
 make check-config
 make generate                      # small preset: 13 monthly loads in a few seconds
 make ingest                        # apply the CDC events to a current-state table
-make match-dbt                     # match every load with dbt + DuckDB (about 2 minutes)
-make match-spark                   # the same matching in PySpark (local mode)
+make match-dbt                     # match every load with dbt + DuckDB (about 1 minute)
+make match-spark                   # the same matching in PySpark (local mode, a few minutes)
 make compare-engines               # check every dbt and Spark output table is identical
 make evaluate                      # score each load against ground truth
 make test
@@ -118,6 +111,11 @@ Each decision links to its full reasoning in the [decision log](docs/DESIGN.md#1
 - **Full rematch every load**, with ID reconciliation keeping person IDs stable (D-004, D-005).
 - **One shared Python implementation** for clustering and string similarity, so dbt and Spark cannot disagree (D-006, D-009).
 - **Conservative by default**, because in healthcare a false merge costs more than a duplicate (D-007).
+- **Cannot-link blockers win over matches.** Twins, generational pairs, conflicting suffixes and SSN conflicts are never merged, even through a chain of other matches; clustering skips a join that would break one and records why (D-006, D-034 to D-036).
+- **Reference data lives in one place.** Nicknames, placeholders, particles and letter mappings are CSV files in `config/reference/` read by Python, dbt and Spark alike (D-018, D-029).
+- **Rules are written once and checked three times.** A Python reference defines expected behaviour; dbt is tested against it and Spark against dbt, table by table (D-037, D-039, D-045).
+- **Ground truth is isolated.** Only `evaluation/` and tests may read it, and a test fails if pipeline code mentions it (DESIGN.md section 3.1).
+- **Honest about scope.** Results come from the medium preset; the 5-million-record preset is defined but was not run (D-047).
 
 ## Results
 
@@ -128,6 +126,16 @@ Each decision links to its full reasoning in the [decision log](docs/DESIGN.md#1
 make generate PRESET=medium
 make ingest
 make results                       # match and evaluate all three profiles, then render
+```
+
+To reproduce the engine parity table, also match each profile with Spark and compare
+(a few hours on a laptop; `PROFILE=` is conservative, balanced or aggressive), then
+render the page again without rematching:
+
+```bash
+make match-spark PROFILE=balanced
+make compare-engines PROFILE=balanced
+python -m pipeline results
 ```
 
 What the numbers say, on the medium preset:
@@ -150,10 +158,26 @@ What the numbers say, on the medium preset:
 
 ## Known limitations
 
-Some cases cannot be solved with five fields: full identity copies, unrelated people
-with identical values, an SSN replacement combined with name changes, simultaneous
-first- and last-name changes, and mononyms. Each is generated and measured, and its
-real impact will be reported here.
+Some cases cannot be solved with five fields. Each is generated on purpose and measured
+(conservative profile, medium preset, final load;
+[full table](docs/RESULTS.md#known-limitations-measured-conservative)):
+
+| Case | What happens | Pair precision | Pair recall |
+|---|---|---:|---:|
+| Full identity copy (a stolen identity, all fields copied) | usually merged with the victim | 0.605 | 0.695 |
+| Identical strangers (different people, same values) | usually merged | 0.588 | 0.700 |
+| SSN replacement (new SSN issued) | the two SSNs stay apart | 0.992 | 0.460 |
+| Full name change (first and last name at once) | about half stay apart | 1.000 | 0.746 |
+| Mononym (one name, placeholder in the other field) | most stay apart | 1.000 | 0.568 |
+
+Other limits:
+
+- **Scale is untested beyond the medium preset.** The large preset (5 million records) is
+  defined but has not been run. The Spark run collects each output table on the driver,
+  so driver memory bounds the largest load it can write (D-044, D-047).
+- **Spark is slower than dbt here.** A medium load takes 1.5 to 3 minutes in local-mode
+  Spark on Windows against under a minute in dbt, largely because Windows cannot reuse
+  Python workers (D-046).
 
 ## Example queries
 
