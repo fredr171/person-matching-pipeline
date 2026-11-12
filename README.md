@@ -2,12 +2,13 @@
 
 <!-- CI badge goes here once the GitHub repository exists. -->
 
-> **Status: under construction.** Build phases 1–6 of 8 are complete: the synthetic data
+> **Status: under construction.** Build phases 1–7 of 8 are complete: the synthetic data
 > generator, CDC ingestion, the Python reference rules, the full dbt-on-DuckDB matching
 > pipeline with constrained clustering and stable person IDs
-> ([matching rules](docs/MATCHING_RULES.md)), and evaluation against ground truth
-> ([results](docs/RESULTS.md)). The PySpark implementation and the large-preset run arrive in
-> later phases; see [build phases](docs/DESIGN.md#17-build-phases).
+> ([matching rules](docs/MATCHING_RULES.md)), evaluation against ground truth
+> ([results](docs/RESULTS.md)), and the PySpark implementation, whose every output table is
+> identical to dbt's. The large-preset run arrives in phase 8; see
+> [build phases](docs/DESIGN.md#17-build-phases).
 
 **The problem.** The same person shows up in many source systems under slightly
 different identities: a typo in the SSN, a nickname, a married name, a date of birth
@@ -64,6 +65,8 @@ make check-config
 make generate                      # small preset: 13 monthly loads in a few seconds
 make ingest                        # apply the CDC events to a current-state table
 make match-dbt                     # match every load with dbt + DuckDB (about 2 minutes)
+make match-spark                   # the same matching in PySpark (local mode)
+make compare-engines               # check every dbt and Spark output table is identical
 make evaluate                      # score each load against ground truth
 make test
 ```
@@ -77,12 +80,16 @@ python -m pipeline check-config
 python -m pipeline generate --preset small
 python -m pipeline ingest
 python -m pipeline match-dbt --profile conservative
+python -m pipeline match-spark --profile conservative
+python -m pipeline compare-engines --profile conservative
 python -m pipeline evaluate --profile conservative
 python -m pytest
 ```
 
-The full PySpark run is supported on Linux and macOS, and on Windows via WSL
-([why](docs/DESIGN.md#18-decision-log), D-011).
+The PySpark run works on Linux, macOS and native Windows (no WSL or winutils: the driver
+writes outputs with pyarrow, D-011, D-044). It takes about 25 seconds per small load, most of
+it starting Python workers, which Windows cannot reuse (D-046). On a machine short of memory,
+set `PMP_SPARK_DRIVER_MEMORY=1g` and `PMP_SPARK_MASTER=local[4]`.
 
 ## Repository layout
 

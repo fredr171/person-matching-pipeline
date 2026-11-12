@@ -235,7 +235,7 @@ Shared Python module, run before either matching implementation. For each load i
 
 Applied identically in both implementations. Raw values are kept alongside cleaned values. The Python reference implementation in `standardization/` defines the expected behavior of sections 5 and 7–9, and both engines are tested against it (D-037).
 
-- Unicode NFC normalization, then strip accents through `config/reference/letters.csv` (D-029); uppercase; trim and collapse whitespace; remove punctuation except hyphens and apostrophes inside names (then compare with and without them).
+- Strip accents through `config/reference/letters.csv`, which also maps every precomposed letter, so no engine needs Unicode NFC normalization (D-029); uppercase; trim and collapse whitespace; remove punctuation except hyphens and apostrophes inside names (then compare with and without them).
 - Extract suffixes (JR, SR, II, III, IV, in all common formats) from last and first names into `suffix`.
 - Strip name particles (DE, DE LA, DEL, VAN, VAN DER, VON, AL, EL, DA, DI, LE, LA, O') into a particle-free comparison form; keep the original too.
 - Tokenize names; keep a space-removed form.
@@ -381,7 +381,7 @@ Run per load and per profile, reading truth only in `evaluation/`:
 - **Ingestion tests**: duplicate delivery, out-of-order, late-after-delete, replay, column shift.
 - **Idempotency**: running the same load twice changes zero person IDs.
 - **Locality**: a change to one person's records only changes IDs within the affected clusters.
-- **Parity**: dbt and PySpark outputs (`match_pairs` decisions, `person_assignment`) are identical on the small and medium presets.
+- **Parity**: every dbt and PySpark output table is identical, row for row, on the small and medium presets (`python -m pipeline compare-engines`, D-045).
 - **Determinism**: same seed → identical generated data and identical results.
 
 ## 16. Known limitations (document in README)
@@ -460,6 +460,7 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Alternatives:* Bundle `winutils.exe`/`HADOOP_HOME` setup instructions; Docker.
 - *Reason:* Native Windows Spark needs Hadoop binaries to write files, which is brittle and unrelated to the project's purpose. WSL adds no project-specific setup.
 - *Update (phase 1):* In-memory Spark jobs do run on native Windows once the driver is bound to `127.0.0.1` (Spark rejects hostnames containing underscores), so the toolchain smoke test runs everywhere. Writing files still needs winutils; this will be revisited in phase 7.
+- *Update (phase 7):* Native Windows is supported without WSL or winutils. Spark computes every table in memory, and the driver writes each one with pyarrow (D-044), so Spark never writes files itself.
 
 **D-012 · 2026-11-11 · pip with exact pins and a lock file**
 - *Decision:* Direct dependencies pinned with `==` in `pyproject.toml`; full transitive set frozen in `requirements-lock.txt`.
@@ -550,6 +551,7 @@ Record each significant decision with date, decision, alternatives considered, a
 - *Decision:* `config/reference/letters.csv` maps every accented or special Latin letter (U+00C0–U+017F, plus Ø, Æ, Œ, ß, Ł and others with no Unicode decomposition) to ASCII. Standardization maps through it and then drops any remaining combining marks. `config/reference/genders.csv` maps raw gender values to M, F or X; anything unlisted is null.
 - *Alternatives:* `unicodedata` in Python and `strip_accents` in DuckDB; hard-coded gender codes.
 - *Reason:* Spark has no accent-stripping or NFC function, and letters such as Ø have no Unicode decomposition. A shared table gives all three engines the same result, and mapping before dropping combining marks equals NFC-then-strip, so engines without NFC agree. A test checks the table against Unicode decomposition.
+- *Update (phase 7):* The table now also maps every precomposed letter whose decomposition starts with an ASCII letter (527 rows), so NFC changes no cleaned name; a test proves this for every letter up to U+2FFFF, alone and decomposed. Spark, which has no NFC function, skips it; Python and DuckDB still apply it, harmlessly.
 
 **D-030 · 2026-11-11 · Name comparison forms**
 - *Decision:* Each cleaned name yields these forms: the name; without apostrophes and with hyphens as spaces; that with spaces removed; the same three with one leading particle stripped (longest particle first, O' attached); and, for multi-token names, each token of two or more letters that is not a particle word. Name levels are the best result over all pairs of forms. Particles are stripped from either name field, because family-name-first sources put the surname in the first-name field.
@@ -633,6 +635,21 @@ Record each significant decision with date, decision, alternatives considered, a
   - *Results page:* `docs/RESULTS.md` is generated from the evaluation outputs of all three profiles, like `DATA_GENERATION.md`. The chart is a small SVG written by `evaluation/chart.py`.
 - *Alternatives:* pairwise metrics per edge case only; one strict correct/incorrect figure; matplotlib for the chart; writing RESULTS.md by hand.
 - *Reason:* Splitting false merges from missed matches shows which way a rule fails, and for most cases one direction is what matters (twins must be separated, typos joined). Without separating records that have no partner, the 60% of tagged records that are alone would make every case look good. A generated page cannot drift from the code, and the SVG writer needs no dependency and gives byte-identical output.
+
+**D-044 · 2026-11-11 · PySpark implementation layout** (writing outputs through the driver decided by the project owner)
+- *Decision:* `matching_spark/` mirrors the dbt models as DataFrame code: `standardize.py`, `pairs.py` (blocking, name forms, levels, tiers, blockers), `cluster.py` and `run.py`. Small reference tables become literal map and array columns (the letter table a `translate`, D-046); name variants a broadcast table. Connected components are computed by min-label propagation, iterated to a fixed point with `localCheckpoint`. Each component's members, edges and cannot-links go to `clustering.constrained.cluster_component` through `groupBy(component).applyInArrow`; records in no match edge are singletons and skip it. ID reconciliation runs on the driver with `clustering.ids.reconcile`, as dbt's Python model does. Each table is collected with `toArrow()`, cast to the dbt schema and written, sorted, by pyarrow to `data/matched/spark/<profile>/load_NNNN/`. `python -m pipeline match-spark` runs it.
+- *Alternatives:* `DataFrame.write.parquet` (needs winutils on Windows, writes a directory of part files); GraphFrames for components (an extra JVM package); per-component Python via `applyInPandas`.
+- *Reason:* One file per table in the dbt layout lets evaluation and the parity check read both engines the same way. The shared clustering and reconciliation functions guarantee identical results there; only standardization and pair rules are translated. Collecting to the driver bounds output size by driver memory, which phase 8 checks at the large preset. `applyInArrow` takes an explicit Arrow schema, whereas `applyInPandas` failed to convert the pandas result.
+
+**D-045 · 2026-11-11 · Engine parity check** (tests plus a compare command decided by the project owner)
+- *Decision:* `python -m pipeline compare-engines` compares every output table of every load between the dbt and Spark runs of a profile: same column names and types, same rows. Nullability flags are not compared, because DuckDB marks columns NOT NULL where it can prove it and Spark does not. `tests/test_spark.py` runs both engines on the first boosted loads, the tricky-values load and the aggressive profile, and requires full parity.
+- *Alternatives:* comparing only `match_pairs` decisions and `person_assignment`; comparing Spark with the Python reference directly.
+- *Reason:* `tests/test_dbt.py` already proves dbt equals the Python reference, so Spark equal to dbt is Spark equal to the reference, and one comparison covers every table, metrics included.
+
+**D-046 · 2026-11-11 · Spark performance: few Python tasks, compilable expressions**
+- *Decision:* Double Metaphone codes are computed once per load for every distinct name string. Before each Python step (codes, Jaro-Winkler, clustering) the input is repartitioned to one task per 250,000 rows, capped at the core count. DataFrames built from Python data are created from Arrow tables. The letter table is applied with one `translate` plus one `regexp_replace` per multi-letter result, and SSNs and DOBs are parsed in stages materialized with `localCheckpoint`. Session settings come from `PMP_SPARK_MASTER`, `PMP_SPARK_DRIVER_MEMORY`, `PMP_SPARK_SHUFFLE_PARTITIONS` and `PMP_SPARK_ROWS_PER_PYTHON_TASK`.
+- *Alternatives:* a UDF per stage at the default partition count; computing names on the driver.
+- *Reason:* Windows has no `fork`, so PySpark cannot reuse Python workers there: each Python task starts an interpreter and imports pandas and pyarrow, about three seconds. With 16 tasks per UDF a small load took 80 seconds; sized steps take about 25. A Python list passed to `createDataFrame` becomes pickled rows that only Python workers can read, which cost 16 seconds for a 146-row table. Spark inlines every derived column into each use; as single expressions, the DOB parser and two 527-entry literal maps produced Java code too large to compile, and Spark fell back to interpreting it, which made standardization of a medium load take 143 seconds instead of 25.
 
 ## 19. Publishing on GitHub
 
