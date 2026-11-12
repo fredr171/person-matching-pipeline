@@ -8,7 +8,7 @@ SEED ?=
 
 SEED_ARG := $(if $(SEED),--seed $(SEED),)
 
-.PHONY: help install check-config docs generate ingest match-dbt match-spark evaluate results test lint format
+.PHONY: help install check-config docs generate ingest match-dbt match-spark compare-engines evaluate results test lint format
 
 help:
 	@echo "make install      Install pinned dependencies and the project (editable)"
@@ -18,6 +18,7 @@ help:
 	@echo "make ingest       Apply CDC events to current state"
 	@echo "make match-dbt    Run matching with dbt on DuckDB (PROFILE=$(PROFILE))"
 	@echo "make match-spark  Run matching with PySpark       (PROFILE=$(PROFILE))"
+	@echo "make compare-engines  Check dbt and Spark outputs are identical (PROFILE=$(PROFILE))"
 	@echo "make evaluate     Score results against ground truth (PROFILE=$(PROFILE))"
 	@echo "make results      Match and evaluate every profile, then write docs/RESULTS.md"
 	@echo "make test         Run the test suite"
@@ -38,6 +39,9 @@ match-dbt:
 
 match-spark:
 	$(PYTHON) -m pipeline match-spark --profile $(PROFILE)
+
+compare-engines:
+	$(PYTHON) -m pipeline compare-engines --profile $(PROFILE)
 
 evaluate:
 	$(PYTHON) -m pipeline evaluate --profile $(PROFILE)

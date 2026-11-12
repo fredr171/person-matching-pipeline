@@ -21,10 +21,9 @@ from pipeline import config, paths, reference
 EXIT_OK = 0
 EXIT_NOT_IMPLEMENTED = 2
 
-# Command -> build phase that implements it.
-_PLANNED_COMMANDS: dict[str, tuple[int, str]] = {
-    "match-spark": (7, "Run matching with PySpark"),
-}
+# Command -> build phase that implements it. Empty once every stage is built,
+# but kept so a future stage can be announced before it exists.
+_PLANNED_COMMANDS: dict[str, tuple[int, str]] = {}
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -53,16 +52,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--through-load", type=int, default=None, help="Stop after this load (default: all)"
     )
 
-    match_dbt = sub.add_parser("match-dbt", help="Run matching with dbt on DuckDB")
-    match_dbt.add_argument(
-        "--profile", default=None, help="conservative | balanced | aggressive (default: config)"
-    )
-    match_dbt.add_argument(
-        "--data-dir", type=Path, default=paths.DEFAULT_DATA_DIR, help="Data directory"
-    )
-    match_dbt.add_argument(
-        "--through-load", type=int, default=None, help="Stop after this load (default: all)"
-    )
+    for name, help_text in (
+        ("match-dbt", "Run matching with dbt on DuckDB"),
+        ("match-spark", "Run matching with PySpark in local mode"),
+        ("compare-engines", "Check that the dbt and Spark outputs are identical"),
+    ):
+        command = sub.add_parser(name, help=help_text)
+        command.add_argument(
+            "--profile", default=None, help="conservative | balanced | aggressive (default: config)"
+        )
+        command.add_argument(
+            "--data-dir", type=Path, default=paths.DEFAULT_DATA_DIR, help="Data directory"
+        )
+        command.add_argument(
+            "--through-load", type=int, default=None, help="Stop after this load (default: all)"
+        )
 
     evaluate = sub.add_parser("evaluate", help="Score matched loads against ground truth")
     evaluate.add_argument(
@@ -85,11 +89,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     for name, (phase, help_text) in _PLANNED_COMMANDS.items():
-        command = sub.add_parser(name, help=f"{help_text} (phase {phase})")
-        if name == "match-spark":
-            command.add_argument(
-                "--profile", default=None, help="conservative | balanced | aggressive"
-            )
+        sub.add_parser(name, help=f"{help_text} (phase {phase})")
     return parser
 
 
@@ -147,8 +147,11 @@ def _ingest(data_dir: Path, through_load: int | None) -> int:
     return EXIT_OK
 
 
-def _match_dbt(profile: str | None, data_dir: Path, through_load: int | None) -> int:
-    from pipeline.match_dbt import match_all
+def _match(engine: str, profile: str | None, data_dir: Path, through_load: int | None) -> int:
+    if engine == "dbt":
+        from pipeline.match_dbt import match_all
+    else:
+        from pipeline.match_spark import match_all
 
     started = time.perf_counter()
     count = 0
@@ -163,8 +166,33 @@ def _match_dbt(profile: str | None, data_dir: Path, through_load: int | None) ->
             f"{m.get(('person_ids', 'records_with_changed_id'), 0):>6,} id changes "
             f"({run.seconds:.1f}s)"
         )
-    print(f"Matched {count} loads with dbt in {time.perf_counter() - started:.1f}s")
+    print(f"Matched {count} loads with {engine} in {time.perf_counter() - started:.1f}s")
     return EXIT_OK
+
+
+def _compare_engines(profile: str | None, data_dir: Path, through_load: int | None) -> int:
+    from pipeline.compare_engines import compare_engines
+
+    name = config.load_matching_config().profile(profile).name
+    result = compare_engines(name, data_dir, through_load)
+    for d in result.differences:
+        print(f"load {d.load_id:>2} {d.table}: {d.problem}")
+        for label, rows in (("dbt only", d.only_dbt), ("spark only", d.only_spark)):
+            for row in rows:
+                print(f"    {label}: {row}")
+    loads = f"loads {result.loads[0]}-{result.loads[-1]}"
+    if result.identical:
+        print(
+            f"Profile {name}, {loads}: all {result.tables_compared} tables identical "
+            f"({result.rows_compared:,} rows)"
+        )
+        return EXIT_OK
+    print(
+        f"Profile {name}, {loads}: {len(result.differences)} of {result.tables_compared} "
+        f"tables differ",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _evaluate(profile: str | None, engine: str, data_dir: Path, through_load: int | None) -> int:
@@ -206,8 +234,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _docs()
     if args.command == "ingest":
         return _ingest(args.data_dir, args.through_load)
-    if args.command == "match-dbt":
-        return _match_dbt(args.profile, args.data_dir, args.through_load)
+    if args.command in ("match-dbt", "match-spark"):
+        engine = args.command.removeprefix("match-")
+        return _match(engine, args.profile, args.data_dir, args.through_load)
+    if args.command == "compare-engines":
+        return _compare_engines(args.profile, args.data_dir, args.through_load)
     if args.command == "evaluate":
         return _evaluate(args.profile, args.engine, args.data_dir, args.through_load)
     if args.command == "results":
